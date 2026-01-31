@@ -4,6 +4,8 @@
 
 Simplarr bundles Plex with the popular *arr suite (Radarr, Sonarr, Prowlarr) and handles all the wiring between them. Run the setup, start the containers, complete two quick wizards, and you're streaming.
 
+> ⚠️ **Early Release Notice:** While comprehensive automated testing has been completed, full end-to-end validation in diverse environments is ongoing. You may encounter issues during setup or operation. Please report any problems via GitHub issues — feedback is actively being collected and addressed to improve the setup experience.
+
 ## 🎯 How It Simplifies Setup
 
 Setting up a media server typically involves lots of manual configuration. Simplarr handles the tedious parts for you:
@@ -297,10 +299,9 @@ Please include:
 
 ## 🧪 Development & Testing
 
-**For contributors:** The `dev-testing/` directory contains automated test scripts that validate the entire setup. These are **for development only** and not needed for normal use.
+**For contributors:** The `dev-testing/` directory contains an automated test suite that validates the entire setup. This is **for development only** and not needed for normal use.
 
-- `test.ps1` (PowerShell) - Comprehensive test suite
-- `test.sh` (Bash) - Legacy version (PowerShell is maintained)
+- `test.ps1` (PowerShell) - Comprehensive test suite with ~83 tests
 
 See [dev-testing/README.md](dev-testing/README.md) for details.
 
