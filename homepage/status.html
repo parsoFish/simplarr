@@ -123,14 +123,18 @@
   </div>
 
   <script>
+    // Get current hostname for building URLs
+    const host = window.location.hostname;
+    const protocol = window.location.protocol;
+
     const services = [
-      { id: 'plex', url: '/plex', timeout: 5000 },
-      { id: 'radarr', url: '/radarr/ping', timeout: 3000 },
-      { id: 'sonarr', url: '/sonarr/ping', timeout: 3000 },
-      { id: 'prowlarr', url: '/prowlarr/ping', timeout: 3000 },
-      { id: 'overseerr', url: '/overseerr/api/v1/status', timeout: 3000 },
-      { id: 'qbittorrent', url: '/torrent', timeout: 3000 },
-      { id: 'tautulli', url: '/tautulli/status', timeout: 3000 }
+      { id: 'plex', url: `${protocol}//${host}:32400/identity`, timeout: 5000 },
+      { id: 'radarr', url: `${protocol}//${host}:7878/ping`, timeout: 3000 },
+      { id: 'sonarr', url: `${protocol}//${host}:8989/ping`, timeout: 3000 },
+      { id: 'prowlarr', url: `${protocol}//${host}:9696/ping`, timeout: 3000 },
+      { id: 'overseerr', url: `${protocol}//${host}:5055/api/v1/status`, timeout: 3000 },
+      { id: 'qbittorrent', url: `${protocol}//${host}:8080/`, timeout: 3000 },
+      { id: 'tautulli', url: `${protocol}//${host}:8181/status`, timeout: 3000 }
     ];
 
     async function checkService(service) {
