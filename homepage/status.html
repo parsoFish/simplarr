@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Service Status</title>
+  <meta http-equiv="refresh" content="30">
+  <style>
+    body {
+      background-color: #1e1e2f;
+      color: #ffffff;
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      min-height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 15px;
+      width: 100%;
+      max-width: 500px;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      font-size: 14px;
+      margin-bottom: 20px;
+    }
+    .service {
+      background-color: #2d2d44;
+      padding: 15px 20px;
+      border-radius: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .service-name {
+      font-size: 16px;
+    }
+    .status {
+      padding: 6px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: bold;
+    }
+    .status.checking {
+      background-color: #555;
+      color: #ccc;
+    }
+    .status.up {
+      background-color: #2d5a2d;
+      color: #4ade4a;
+    }
+    .status.down {
+      background-color: #5a2d2d;
+      color: #de4a4a;
+    }
+    .back-link {
+      text-align: center;
+      margin-top: 20px;
+    }
+    .back-link a {
+      color: #888;
+      text-decoration: none;
+    }
+    .back-link a:hover {
+      color: #fff;
+    }
+    .refresh-note {
+      text-align: center;
+      color: #555;
+      font-size: 12px;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📡 Service Status</h1>
+    <p class="subtitle">Auto-refreshes every 30 seconds</p>
+
+    <div class="service">
+      <span class="service-name">🎥 Plex</span>
+      <span class="status checking" id="status-plex">Checking...</span>
+    </div>
+    <div class="service">
+      <span class="service-name">🎬 Radarr</span>
+      <span class="status checking" id="status-radarr">Checking...</span>
+    </div>
+    <div class="service">
+      <span class="service-name">📺 Sonarr</span>
+      <span class="status checking" id="status-sonarr">Checking...</span>
+    </div>
+    <div class="service">
+      <span class="service-name">🔍 Prowlarr</span>
+      <span class="status checking" id="status-prowlarr">Checking...</span>
+    </div>
+    <div class="service">
+      <span class="service-name">📥 Overseerr</span>
+      <span class="status checking" id="status-overseerr">Checking...</span>
+    </div>
+    <div class="service">
+      <span class="service-name">⬇️ qBittorrent</span>
+      <span class="status checking" id="status-qbittorrent">Checking...</span>
+    </div>
+    <div class="service">
+      <span class="service-name">📊 Tautulli</span>
+      <span class="status checking" id="status-tautulli">Checking...</span>
+    </div>
+
+    <div class="back-link">
+      <a href="/">← Back to Dashboard</a>
+    </div>
+    <p class="refresh-note">Page auto-refreshes • Last check: <span id="last-check">--</span></p>
+  </div>
+
+  <script>
+    const services = [
+      { id: 'plex', url: '/plex', timeout: 5000 },
+      { id: 'radarr', url: '/radarr/ping', timeout: 3000 },
+      { id: 'sonarr', url: '/sonarr/ping', timeout: 3000 },
+      { id: 'prowlarr', url: '/prowlarr/ping', timeout: 3000 },
+      { id: 'overseerr', url: '/overseerr/api/v1/status', timeout: 3000 },
+      { id: 'qbittorrent', url: '/torrent', timeout: 3000 },
+      { id: 'tautulli', url: '/tautulli/status', timeout: 3000 }
+    ];
+
+    async function checkService(service) {
+      const el = document.getElementById(`status-${service.id}`);
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), service.timeout);
+        
+        const response = await fetch(service.url, { 
+          method: 'HEAD',
+          signal: controller.signal,
+          mode: 'no-cors'
+        });
+        clearTimeout(timeoutId);
+        
+        // no-cors means we can't read status, but if we get here without error, service responded
+        el.textContent = 'Online';
+        el.className = 'status up';
+      } catch (err) {
+        el.textContent = 'Offline';
+        el.className = 'status down';
+      }
+    }
+
+    async function checkAll() {
+      document.getElementById('last-check').textContent = new Date().toLocaleTimeString();
+      for (const service of services) {
+        checkService(service);
+      }
+    }
+
+    // Initial check
+    checkAll();
+  </script>
+</body>
+</html>

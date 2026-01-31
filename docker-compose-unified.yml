@@ -1,0 +1,281 @@
+services:
+  # ===================
+  # Media Server
+  # ===================
+  plex:
+    image: linuxserver/plex:latest
+    container_name: plex
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - VERSION=docker
+      - TZ=${TZ}
+      - PLEX_CLAIM=${PLEX_CLAIM}
+    volumes:
+      - ${DOCKER_CONFIG}/plex:/config
+      - ${DOCKER_MEDIA}/movies:/movies
+      - ${DOCKER_MEDIA}/tv:/tv
+    healthcheck:
+      test: curl -f http://localhost:32400/identity || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  # ===================
+  # Download Client
+  # ===================
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    ports:
+      - 8080:8080
+      - 6881:6881
+      - 6881:6881/udp
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+    volumes:
+      - ${DOCKER_CONFIG}/qbittorrent:/config
+      - ${DOCKER_MEDIA}/downloads:/downloads
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===================
+  # Media Management
+  # ===================
+  radarr:
+    image: linuxserver/radarr:latest
+    container_name: radarr
+    ports:
+      - 7878:7878
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_CONFIG}/radarr:/config
+      - ${DOCKER_MEDIA}/downloads:/downloads
+      - ${DOCKER_MEDIA}/movies:/movies
+    healthcheck:
+      test: curl -f http://localhost:7878/ping || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  sonarr:
+    image: linuxserver/sonarr:latest
+    container_name: sonarr
+    ports:
+      - 8989:8989
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_CONFIG}/sonarr:/config
+      - ${DOCKER_MEDIA}/downloads:/downloads
+      - ${DOCKER_MEDIA}/tv:/tv
+    healthcheck:
+      test: curl -f http://localhost:8989/ping || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  prowlarr:
+    image: linuxserver/prowlarr:latest
+    container_name: prowlarr
+    ports:
+      - 9696:9696
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_CONFIG}/prowlarr:/config
+    healthcheck:
+      test: curl -f http://localhost:9696/ping || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===================
+  # Requests & Monitoring
+  # ===================
+  overseerr:
+    image: sctx/overseerr:latest
+    container_name: overseerr
+    ports:
+      - 5055:5055
+    environment:
+      - TZ=${TZ}
+      - LOG_LEVEL=info
+    volumes:
+      - ${DOCKER_CONFIG}/overseerr:/app/config
+    healthcheck:
+      test: wget -q --spider http://localhost:5055/api/v1/status || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  tautulli:
+    image: linuxserver/tautulli:latest
+    container_name: tautulli
+    ports:
+      - 8181:8181
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+    volumes:
+      - ${DOCKER_CONFIG}/tautulli:/config
+    healthcheck:
+      test: curl -f http://localhost:8181/status || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  # ===================
+  # Reverse Proxy & Homepage
+  # ===================
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ${DOCKER_CONFIG}/nginx/ssl:/etc/nginx/ssl:ro
+      - ./nginx/unified.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${DOCKER_CONFIG}/nginx/logs:/var/log/nginx
+    healthcheck:
+      test: curl -f http://localhost:80 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      plex:
+        condition: service_healthy
+      radarr:
+        condition: service_healthy
+      sonarr:
+        condition: service_healthy
+      overseerr:
+        condition: service_healthy
+      homepage:
+        condition: service_healthy
+    restart: unless-stopped
+
+  homepage:
+    build: ./homepage
+    container_name: homepage
+    expose:
+      - "80"
+    healthcheck:
+      test: curl -f http://localhost:80 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+networks:
+  default:
+    name: media-network
+
+# =============================================================================
+# VPN Configuration (Optional - Uncomment to Enable)
+# =============================================================================
+# To route qBittorrent traffic through a VPN using Gluetun:
+#
+# 1. Uncomment the 'gluetun' service below
+# 2. Add VPN environment variables to unified.env (see .env.vpn.example)
+# 3. Comment out the 'ports' section in qbittorrent above
+# 4. Uncomment the 'qbittorrent-vpn-overrides' section below
+#
+# Verify VPN is working:
+#   docker exec qbittorrent curl -s https://ipinfo.io/ip
+# =============================================================================
+
+#  gluetun:
+#    image: qmcgaw/gluetun:latest
+#    container_name: gluetun
+#    cap_add:
+#      - NET_ADMIN
+#    devices:
+#      - /dev/net/tun:/dev/net/tun
+#    ports:
+#      # qBittorrent ports (move here from qbittorrent service when enabling VPN)
+#      - 8080:8080
+#      - 6881:6881
+#      - 6881:6881/udp
+#    environment:
+#      # VPN Provider - see https://github.com/qdm12/gluetun-wiki for options
+#      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER}
+#      - VPN_TYPE=${VPN_TYPE:-openvpn}
+#      # OpenVPN credentials
+#      - OPENVPN_USER=${OPENVPN_USER}
+#      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+#      # WireGuard credentials (if using WireGuard)
+#      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+#      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+#      # Server location
+#      - SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES}
+#      - TZ=${TZ}
+#    volumes:
+#      - ${DOCKER_CONFIG}/gluetun:/gluetun
+#    healthcheck:
+#      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 5
+#      start_period: 60s
+#    restart: unless-stopped
+
+# -----------------------------------------------------------------------------
+# qBittorrent VPN Overrides
+# -----------------------------------------------------------------------------
+# When enabling VPN, replace the qbittorrent service above with this version:
+# -----------------------------------------------------------------------------
+#  qbittorrent:
+#    image: linuxserver/qbittorrent:latest
+#    container_name: qbittorrent
+#    network_mode: "service:gluetun"
+#    environment:
+#      - PUID=${PUID}
+#      - PGID=${PGID}
+#      - TZ=${TZ}
+#      - WEBUI_PORT=8080
+#    volumes:
+#      - ${DOCKER_CONFIG}/qbittorrent:/config
+#      - ${DOCKER_MEDIA}/downloads:/downloads
+#    healthcheck:
+#      test: curl -f http://localhost:8080 || exit 1
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 30s
+#    depends_on:
+#      gluetun:
+#        condition: service_healthy
+#    restart: unless-stopped

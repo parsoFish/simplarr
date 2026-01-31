@@ -1,0 +1,45 @@
+# =============================================================================
+# Simplarr .gitignore
+# =============================================================================
+
+# User-generated environment files (created by setup scripts)
+.env
+.env.local
+.env.test
+
+# Keep template .env files (they have placeholders, not real values)
+# nas.env, pi.env, unified.env are safe - they use ${placeholders}
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Linux
+*~
+
+# IDE / Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*.sublime-workspace
+
+# Logs
+*.log
+
+# Local config backups
+*.bak
+*.backup
+
+# Docker volumes (if accidentally placed in repo)
+volumes/
+
+# Temporary files
+*.tmp
+*.temp

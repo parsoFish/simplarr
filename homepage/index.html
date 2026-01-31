@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Simplarr Dashboard</title>
+  <style>
+    body {
+      background-color: #1e1e2f;
+      color: #ffffff;
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+    }
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      width: 100%;
+      max-width: 400px;
+    }
+    .link {
+      background-color: #2d2d44;
+      color: #ffffff;
+      font-size: 18px;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      width: 100%;
+      box-sizing: border-box;
+      transition: background-color 0.2s;
+    }
+    .link:hover {
+      background-color: #3e3e5f;
+    }
+    .link.secondary {
+      background-color: #1e1e2f;
+      border: 1px solid #3e3e5f;
+      font-size: 14px;
+      padding: 12px;
+    }
+    .link.secondary:hover {
+      background-color: #2d2d44;
+    }
+    h1 {
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #888;
+      font-size: 14px;
+      margin-top: -30px;
+      margin-bottom: 30px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎬 Simplarr</h1>
+    <p class="subtitle">Your home entertainment hub</p>
+
+    <a class="link" id="plex" target="_blank">🎥 Plex</a>
+    <a class="link" id="overseerr" target="_blank">📥 Request Content</a>
+    <a class="link" id="radarr" target="_blank">🎬 Radarr (Movies)</a>
+    <a class="link" id="sonarr" target="_blank">📺 Sonarr (TV Shows)</a>
+    <a class="link" id="prowlarr" target="_blank">🔍 Prowlarr (Indexers)</a>
+    <a class="link" id="qbittorrent" target="_blank">⬇️ qBittorrent</a>
+    <a class="link" id="tautulli" target="_blank">📊 Tautulli (Stats)</a>
+    <a class="link secondary" href="/status">📡 Service Status</a>
+  </div>
+
+  <script>
+    // Service ports - direct access without path-based routing
+    const services = {
+      plex: 32400,
+      overseerr: 5055,
+      radarr: 7878,
+      sonarr: 8989,
+      prowlarr: 9696,
+      qbittorrent: 8080,
+      tautulli: 8181
+    };
+
+    // Build URLs using the current hostname
+    const host = window.location.hostname;
+    const protocol = window.location.protocol;
+
+    for (const [id, port] of Object.entries(services)) {
+      const el = document.getElementById(id);
+      if (el) {
+        // Plex has /web path, others get trailing slash
+        const path = id === 'plex' ? '/web' : '/';
+        el.href = `${protocol}//${host}:${port}${path}`;
+      }
+    }
+  </script>
+</body>
+</html>

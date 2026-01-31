@@ -1,0 +1,131 @@
+services:
+  plex:
+    image: linuxserver/plex:latest
+    container_name: plex
+    network_mode: host
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - VERSION=docker
+      - TZ=${TZ}
+      - PLEX_CLAIM=${PLEX_CLAIM}
+    volumes:
+      - ${DOCKER_CONFIG}/plex:/config
+      - ${DOCKER_MEDIA}/movies:/movies
+      - ${DOCKER_MEDIA}/tv:/tv
+    healthcheck:
+      test: curl -f http://localhost:32400/identity || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    restart: unless-stopped
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:latest
+    container_name: qbittorrent
+    ports:
+      - 8080:8080
+      - 6881:6881
+      - 6881:6881/udp
+    environment:
+      - PUID=${PUID}
+      - PGID=${PGID}
+      - TZ=${TZ}
+      - WEBUI_PORT=8080
+    volumes:
+      - ${DOCKER_CONFIG}/qbittorrent:/config
+      - ${DOCKER_MEDIA}/downloads:/downloads
+      - ${DOCKER_MEDIA}/downloads/movies:/downloads/movies
+      - ${DOCKER_MEDIA}/downloads/tv:/downloads/tv
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+networks:
+  default:
+    name: media-network
+
+# =============================================================================
+# VPN Configuration (Optional - Uncomment to Enable)
+# =============================================================================
+# Route qBittorrent traffic through a VPN using Gluetun for privacy.
+# The VPN runs on the NAS since that's where the download client is.
+#
+# 1. Uncomment the 'gluetun' service below
+# 2. Add VPN environment variables to nas.env (see .env.vpn.example)
+# 3. Comment out the 'ports' section in qbittorrent above
+# 4. Uncomment the 'qbittorrent-vpn-overrides' section below
+#
+# Verify VPN is working:
+#   docker exec qbittorrent curl -s https://ipinfo.io/ip
+# =============================================================================
+
+#  gluetun:
+#    image: qmcgaw/gluetun:latest
+#    container_name: gluetun
+#    cap_add:
+#      - NET_ADMIN
+#    devices:
+#      - /dev/net/tun:/dev/net/tun
+#    ports:
+#      # qBittorrent ports (move here from qbittorrent service when enabling VPN)
+#      - 8080:8080
+#      - 6881:6881
+#      - 6881:6881/udp
+#    environment:
+#      # VPN Provider - see https://github.com/qdm12/gluetun-wiki for options
+#      - VPN_SERVICE_PROVIDER=${VPN_SERVICE_PROVIDER}
+#      - VPN_TYPE=${VPN_TYPE:-openvpn}
+#      # OpenVPN credentials
+#      - OPENVPN_USER=${OPENVPN_USER}
+#      - OPENVPN_PASSWORD=${OPENVPN_PASSWORD}
+#      # WireGuard credentials (if using WireGuard)
+#      - WIREGUARD_PRIVATE_KEY=${WIREGUARD_PRIVATE_KEY}
+#      - WIREGUARD_ADDRESSES=${WIREGUARD_ADDRESSES}
+#      # Server location
+#      - SERVER_COUNTRIES=${VPN_SERVER_COUNTRIES}
+#      - TZ=${TZ}
+#    volumes:
+#      - ${DOCKER_CONFIG}/gluetun:/gluetun
+#    healthcheck:
+#      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 5
+#      start_period: 60s
+#    restart: unless-stopped
+
+# -----------------------------------------------------------------------------
+# qBittorrent VPN Overrides
+# -----------------------------------------------------------------------------
+# When enabling VPN, replace the qbittorrent service above with this version:
+# -----------------------------------------------------------------------------
+#  qbittorrent:
+#    image: linuxserver/qbittorrent:latest
+#    container_name: qbittorrent
+#    network_mode: "service:gluetun"
+#    environment:
+#      - PUID=${PUID}
+#      - PGID=${PGID}
+#      - TZ=${TZ}
+#      - WEBUI_PORT=8080
+#    volumes:
+#      - ${DOCKER_CONFIG}/qbittorrent:/config
+#      - ${DOCKER_MEDIA}/downloads:/downloads
+#      - ${DOCKER_MEDIA}/downloads/movies:/downloads/movies
+#      - ${DOCKER_MEDIA}/downloads/tv:/downloads/tv
+#    healthcheck:
+#      test: curl -f http://localhost:8080 || exit 1
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 30s
+#    depends_on:
+#      gluetun:
+#        condition: service_healthy
+#    restart: unless-stopped
