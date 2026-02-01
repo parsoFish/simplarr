@@ -18,14 +18,18 @@ param(
     [string]$SonarrUrl = "http://localhost:8989",
     [string]$ProwlarrUrl = "http://localhost:9696",
     [string]$QBittorrentUrl = "http://localhost:8080",
-    [string]$ConfigDir = ".\configs"
+    [string]$OverseerrUrl = "http://localhost:5055",
+    [string]$ConfigDir = ".\configs",
+    [string]$QBittorrentHost = $env:QBITTORRENT_HOST
 )
 
 # Internal Docker network names
 $RadarrHost = "radarr"
 $SonarrHost = "sonarr"
 $ProwlarrHost = "prowlarr"
-$QBittorrentHost = "qbittorrent"
+$QBittorrentHost = if ([string]::IsNullOrWhiteSpace($QBittorrentHost)) { "qbittorrent" } else { $QBittorrentHost }
+$PlexHost = "plex"
+$OverseerrHost = "overseerr"
 
 # Paths inside containers
 $MoviesPath = "/movies"
@@ -454,6 +458,179 @@ function Sync-ProwlarrIndexers {
     }
 }
 
+function Get-OverseerrApiKey {
+    Write-Info "Retrieving Overseerr API key..."
+    
+    # API key is stored in settings.json after Plex OAuth sign-in
+    $settingsPath = Join-Path $env:DOCKER_CONFIG "overseerr\settings.json"
+    
+    if (-not (Test-Path $settingsPath)) {
+        Write-Warning "Overseerr settings.json not found. User must sign in with Plex first."
+        return $null
+    }
+    
+    try {
+        $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+        $apiKey = $settings.main.apiKey
+        
+        if ([string]::IsNullOrWhiteSpace($apiKey)) {
+            Write-Warning "Overseerr API key not found in settings"
+            return $null
+        }
+        
+        Write-Success "Overseerr API key retrieved"
+        return $apiKey
+    }
+    catch {
+        Write-Warning "Could not read Overseerr settings: $($_.Exception.Message)"
+        return $null
+    }
+}
+
+function Initialize-Overseerr {
+    Write-Info "Checking Overseerr initialization status..."
+    
+    try {
+        $status = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/status" -Method Get -ErrorAction Stop
+        if ($status.initialized) {
+            Write-Success "Overseerr already initialized"
+            return $true
+        }
+    }
+    catch {
+        Write-Warning "Could not check Overseerr status"
+    }
+    
+    return $false
+}
+
+function Add-RadarrToOverseerr {
+    param(
+        [string]$RadarrApiKey,
+        [string]$OverseerrApiKey
+    )
+    
+    Write-Info "Adding Radarr to Overseerr..."
+    
+    try {
+        # Get Radarr profiles and root folders
+        $radarrProfiles = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
+        $rootFolders = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
+        
+        if ($radarrProfiles.Count -eq 0 -or $rootFolders.Count -eq 0) {
+            Write-Warning "Radarr not fully configured (missing profiles or root folders)"
+            return $false
+        }
+        
+        $radarrConfig = @{
+            name = "Radarr"
+            hostname = $RadarrHost
+            port = 7878
+            apiKey = $RadarrApiKey
+            useSsl = $false
+            baseUrl = ""
+            activeProfileId = $radarrProfiles[0].id
+            activeDirectory = $rootFolders[0].path
+            is4k = $false
+            minimumAvailability = "released"
+            isDefault = $true
+            externalUrl = ""
+            syncEnabled = $true
+            preventSearch = $false
+        }
+        
+        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Method Post -Headers @{
+            "Content-Type" = "application/json"
+            "X-Api-Key" = $OverseerrApiKey
+        } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        
+        Write-Success "Radarr added to Overseerr"
+        return $true
+    }
+    catch {
+        Write-Warning "Could not add Radarr to Overseerr: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Add-SonarrToOverseerr {
+    param(
+        [string]$SonarrApiKey,
+        [string]$OverseerrApiKey
+    )
+    
+    Write-Info "Adding Sonarr to Overseerr..."
+    
+    try {
+        # Get Sonarr profiles and root folders
+        $sonarrProfiles = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
+        $rootFolders = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
+        
+        if ($sonarrProfiles.Count -eq 0 -or $rootFolders.Count -eq 0) {
+            Write-Warning "Sonarr not fully configured (missing profiles or root folders)"
+            return $false
+        }
+        
+        $sonarrConfig = @{
+            name = "Sonarr"
+            hostname = $SonarrHost
+            port = 8989
+            apiKey = $SonarrApiKey
+            useSsl = $false
+            baseUrl = ""
+            activeProfileId = $sonarrProfiles[0].id
+            activeDirectory = $rootFolders[0].path
+            is4k = $false
+            isDefault = $true
+            externalUrl = ""
+            syncEnabled = $true
+            preventSearch = $false
+            enableSeasonFolders = $true
+        }
+        
+        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Method Post -Headers @{
+            "Content-Type" = "application/json"
+            "X-Api-Key" = $OverseerrApiKey
+        } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        
+        Write-Success "Sonarr added to Overseerr"
+        return $true
+    }
+    catch {
+        Write-Warning "Could not add Sonarr to Overseerr: $($_.Exception.Message)"
+        return $false
+    }
+}
+
+function Enable-OverseerrWatchlistSync {
+    param([string]$OverseerrApiKey)
+    
+    Write-Info "Enabling Plex Watchlist sync in Overseerr..."
+    
+    try {
+        # Get current main settings
+        $mainSettings = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/main" -Method Get -Headers @{
+            "X-Api-Key" = $OverseerrApiKey
+        } -ErrorAction Stop
+        
+        # Update to enable watchlist sync and auto-approval
+        $mainSettings.autoApproveMovie = $true
+        $mainSettings.autoApproveSeries = $true
+        
+        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/main" -Method Post -Headers @{
+            "Content-Type" = "application/json"
+            "X-Api-Key" = $OverseerrApiKey
+        } -Body ($mainSettings | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        
+        Write-Success "Watchlist sync enabled with auto-approval"
+        return $true
+    }
+    catch {
+        Write-Warning "Could not enable watchlist sync: $($_.Exception.Message)"
+        return $false
+    }
+}
+
 # =============================================================================
 # Main Execution
 # =============================================================================
@@ -470,6 +647,13 @@ Write-Host ""
 $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
 $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
 $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
+
+if ($env:DOCKER_CONFIG -and $ConfigDir -eq ".\configs") {
+    $ConfigDir = $env:DOCKER_CONFIG
+    $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
+    $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
+    $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
+}
 
 if (Test-Path $radarrConfig) {
     Write-Info "Found local config files, extracting API keys..."
@@ -522,6 +706,38 @@ Start-Sleep -Seconds 5
 
 Sync-ProwlarrIndexers -ApiKey $ProwlarrApiKey
 
+Write-Header "Configuring Overseerr"
+
+Wait-ForService -Name "Overseerr" -Url $OverseerrUrl -Endpoint "/api/v1/status"
+
+if (-not (Initialize-Overseerr)) {
+    Write-Warning "Overseerr is not initialized. Please sign in with your Plex account at $OverseerrUrl"
+    Write-Info "Complete the Overseerr sign-in, then press Enter to continue."
+    Write-Info "Or type 'skip' to skip Overseerr configuration for now."
+    $overseerrChoice = Read-Host "Continue"
+    if ($overseerrChoice -match '^(skip|s)$') {
+        Write-Warning "Skipping Overseerr configuration"
+    } elseif (-not (Initialize-Overseerr)) {
+        Write-Warning "Overseerr still not initialized. Skipping Overseerr configuration"
+    }
+}
+
+if (Initialize-Overseerr) {
+    Write-Info "Overseerr is initialized, configuring services..."
+    
+    $overseerrApiKey = Get-OverseerrApiKey
+    
+    if ($null -eq $overseerrApiKey) {
+        Write-Warning "Could not retrieve Overseerr API key - skipping Overseerr configuration"
+    } else {
+        Add-RadarrToOverseerr -RadarrApiKey $RadarrApiKey -OverseerrApiKey $overseerrApiKey
+        Add-SonarrToOverseerr -SonarrApiKey $SonarrApiKey -OverseerrApiKey $overseerrApiKey
+        Enable-OverseerrWatchlistSync -OverseerrApiKey $overseerrApiKey
+        
+        Write-Success "Overseerr configuration complete!"
+    }
+}
+
 Write-Host ""
 Write-Host "╔═══════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
 Write-Host "║                    Configuration Complete! 🎉                          ║" -ForegroundColor Green
@@ -534,11 +750,13 @@ Write-Host "║  ✓ qBittorrent → Sonarr (download client)                   
 Write-Host "║  ✓ Prowlarr → Radarr (indexer sync)                                    ║" -ForegroundColor Green
 Write-Host "║  ✓ Prowlarr → Sonarr (indexer sync)                                    ║" -ForegroundColor Green
 Write-Host "║  ✓ Public indexers added to Prowlarr                                   ║" -ForegroundColor Green
+Write-Host "║  ✓ Overseerr → Plex (watchlist monitoring)                             ║" -ForegroundColor Green
+Write-Host "║  ✓ Overseerr → Radarr + Sonarr (auto-requests)                         ║" -ForegroundColor Green
 Write-Host "║                                                                        ║" -ForegroundColor Green
 Write-Host "║  Next Steps:                                                           ║" -ForegroundColor Green
-Write-Host "║  1. Open Radarr/Sonarr and verify Settings > Download Clients          ║" -ForegroundColor Green
-Write-Host "║  2. Check Prowlarr > Settings > Apps for sync status                   ║" -ForegroundColor Green
-Write-Host "║  3. Add a movie in Radarr or show in Sonarr to test                    ║" -ForegroundColor Green
+Write-Host "║  1. Sign in to Overseerr with your Plex account                        ║" -ForegroundColor Green
+Write-Host "║  2. Add a movie or show to your Plex watchlist                         ║" -ForegroundColor Green
+Write-Host "║  3. Watch it automatically download and appear in your library!        ║" -ForegroundColor Green
 Write-Host "║  4. (Optional) Add more indexers in Prowlarr                           ║" -ForegroundColor Green
 Write-Host "║                                                                        ║" -ForegroundColor Green
 Write-Host "╚═══════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green

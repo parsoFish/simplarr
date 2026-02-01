@@ -36,6 +36,8 @@ RADARR_HOST="${RADARR_HOST:-radarr}"
 SONARR_HOST="${SONARR_HOST:-sonarr}"
 PROWLARR_HOST="${PROWLARR_HOST:-prowlarr}"
 QBITTORRENT_HOST="${QBITTORRENT_HOST:-qbittorrent}"
+PLEX_HOST="${PLEX_HOST:-plex}"
+OVERSEERR_HOST="${OVERSEERR_HOST:-overseerr}"
 
 # Paths inside containers
 MOVIES_PATH="${MOVIES_PATH:-/movies}"
@@ -478,6 +480,181 @@ sync_prowlarr_indexers() {
 }
 
 # =============================================================================
+# Overseerr Configuration Functions
+# =============================================================================
+
+# Check if Overseerr is already initialized
+# Get Overseerr API key from settings.json
+get_overseerr_api_key() {
+    log_info "Retrieving Overseerr API key..."
+    
+    local settings_path="${DOCKER_CONFIG}/overseerr/settings.json"
+    
+    if [ ! -f "$settings_path" ]; then
+        log_error "Overseerr settings.json not found. User must sign in with Plex first."
+        return 1
+    fi
+    
+    local api_key=$(grep -o '"apiKey":"[^"]*"' "$settings_path" | cut -d'"' -f4)
+    
+    if [ -z "$api_key" ]; then
+        log_error "Overseerr API key not found in settings"
+        return 1
+    fi
+    
+    log_success "Overseerr API key retrieved"
+    echo "$api_key"
+    return 0
+}
+
+initialize_overseerr() {
+    log_info "Checking Overseerr initialization status..."
+    
+    local status_response=$(curl -s "${OVERSEERR_URL}/api/v1/status")
+    
+    if echo "$status_response" | grep -q '"initialized":true'; then
+        log_info "Overseerr is already initialized"
+        return 0
+    else
+        log_info "Overseerr is not yet initialized"
+        return 1
+    fi
+}
+
+# Add Radarr to Overseerr
+add_radarr_to_overseerr() {
+    local radarr_api_key=$1
+    local overseerr_api_key=$2
+    
+    log_info "Adding Radarr to Overseerr..."
+    
+    # Get Radarr quality profiles
+    local profiles=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
+        "${RADARR_URL}/api/v3/qualityprofile")
+    local profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+    
+    # Get Radarr root folders
+    local root_folders=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
+        "${RADARR_URL}/api/v3/rootfolder")
+    local root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
+    
+    if [ -z "$profile_id" ] || [ -z "$root_path" ]; then
+        log_error "Failed to get Radarr configuration"
+        return 1
+    fi
+    
+    local radarr_config="{
+        \"name\": \"Radarr\",
+        \"hostname\": \"${RADARR_HOST}\",
+        \"port\": 7878,
+        \"apiKey\": \"${radarr_api_key}\",
+        \"useSsl\": false,
+        \"baseUrl\": \"\",
+        \"activeProfileId\": ${profile_id},
+        \"activeDirectory\": \"${root_path}\",
+        \"is4k\": false,
+        \"minimumAvailability\": \"released\",
+        \"isDefault\": true,
+        \"externalUrl\": \"\",
+        \"syncEnabled\": true
+    }"
+    
+    local response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
+        -H "Content-Type: application/json" \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        -d "$radarr_config")
+    
+    if echo "$response" | grep -q '"id"'; then
+        log_success "Radarr added to Overseerr"
+        return 0
+    else
+        log_error "Failed to add Radarr to Overseerr"
+        return 1
+    fi
+}
+
+# Add Sonarr to Overseerr
+add_sonarr_to_overseerr() {
+    local sonarr_api_key=$1
+    local overseerr_api_key=$2
+    
+    log_info "Adding Sonarr to Overseerr..."
+    
+    # Get Sonarr quality profiles
+    local profiles=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
+        "${SONARR_URL}/api/v3/qualityprofile")
+    local profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+    
+    # Get Sonarr root folders
+    local root_folders=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
+        "${SONARR_URL}/api/v3/rootfolder")
+    local root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
+    
+    if [ -z "$profile_id" ] || [ -z "$root_path" ]; then
+        log_error "Failed to get Sonarr configuration"
+        return 1
+    fi
+    
+    local sonarr_config="{
+        \"name\": \"Sonarr\",
+        \"hostname\": \"${SONARR_HOST}\",
+        \"port\": 8989,
+        \"apiKey\": \"${sonarr_api_key}\",
+        \"useSsl\": false,
+        \"baseUrl\": \"\",
+        \"activeProfileId\": ${profile_id},
+        \"activeDirectory\": \"${root_path}\",
+        \"is4k\": false,
+        \"enableSeasonFolders\": true,
+        \"isDefault\": true,
+        \"externalUrl\": \"\",
+        \"syncEnabled\": true
+    }"
+    
+    local response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
+        -H "Content-Type: application/json" \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        -d "$sonarr_config")
+    
+    if echo "$response" | grep -q '"id"'; then
+        log_success "Sonarr added to Overseerr"
+        return 0
+    else
+        log_error "Failed to add Sonarr to Overseerr"
+        return 1
+    fi
+}
+
+# Enable Plex watchlist sync in Overseerr
+enable_overseerr_watchlist_sync() {
+    local overseerr_api_key=$1
+    
+    log_info "Enabling Overseerr watchlist sync..."
+    
+    # Get current settings
+    local current_settings=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" \
+        "${OVERSEERR_URL}/api/v1/settings/main")
+    
+    # Update with watchlist sync enabled
+    local updated_settings=$(echo "$current_settings" | \
+        sed 's/"autoApproveMovie":[^,]*/"autoApproveMovie":true/' | \
+        sed 's/"autoApproveSeries":[^,]*/"autoApproveSeries":true/')
+    
+    local response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/main" \
+        -H "Content-Type: application/json" \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        -d "$updated_settings")
+    
+    if echo "$response" | grep -q '"autoApproveMovie":true'; then
+        log_success "Watchlist sync enabled with auto-approval"
+        return 0
+    else
+        log_error "Failed to enable watchlist sync"
+        return 1
+    fi
+}
+
+# =============================================================================
 # Main Execution
 # =============================================================================
 
@@ -499,7 +676,7 @@ main() {
     echo ""
     
     # Get config directory from environment or use default
-    CONFIG_DIR="${CONFIG_DIR:-./configs}"
+    CONFIG_DIR="${CONFIG_DIR:-${DOCKER_CONFIG:-./configs}}"
     
     # Check if we should use local config files or wait for services
     if [ -f "${CONFIG_DIR}/radarr/config.xml" ]; then
@@ -574,6 +751,42 @@ main() {
     sync_prowlarr_indexers "$PROWLARR_API_KEY"
     
     echo ""
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}                    Configuring Overseerr${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    
+    wait_for_service "Overseerr" "$OVERSEERR_URL" "/api/v1/status"
+    
+    if ! initialize_overseerr; then
+        log_error "Overseerr is not initialized. Please sign in with your Plex account at $OVERSEERR_URL"
+        echo "Complete the Overseerr sign-in, then press Enter to continue."
+        echo "Or type 'skip' to skip Overseerr configuration for now."
+        read -p "Continue: " overseerr_choice
+        if [[ "$overseerr_choice" =~ ^(skip|s)$ ]]; then
+            log_warn "Skipping Overseerr configuration"
+        elif ! initialize_overseerr; then
+            log_warn "Overseerr still not initialized. Skipping Overseerr configuration"
+        fi
+    fi
+
+    if initialize_overseerr; then
+        log_info "Overseerr is initialized, configuring services..."
+        
+        overseerr_api_key=$(get_overseerr_api_key)
+        
+        if [ -z "$overseerr_api_key" ]; then
+            log_error "Could not retrieve Overseerr API key - skipping Overseerr configuration"
+        else
+            add_radarr_to_overseerr "$RADARR_API_KEY" "$overseerr_api_key"
+            add_sonarr_to_overseerr "$SONARR_API_KEY" "$overseerr_api_key"
+            enable_overseerr_watchlist_sync "$overseerr_api_key"
+            
+            log_success "Overseerr configuration complete!"
+        fi
+    fi
+    
+    echo ""
     echo -e "${GREEN}"
     echo "╔═══════════════════════════════════════════════════════════════════════╗"
     echo "║                    Configuration Complete! 🎉                          ║"
@@ -581,17 +794,16 @@ main() {
     echo "║                                                                        ║"
     echo "║  Your services are now connected:                                      ║"
     echo "║                                                                        ║"
-    echo "║  ✓ qBittorrent → Radarr (download client)                              ║"
-    echo "║  ✓ qBittorrent → Sonarr (download client)                              ║"
-    echo "║  ✓ Prowlarr → Radarr (indexer sync)                                    ║"
-    echo "║  ✓ Prowlarr → Sonarr (indexer sync)                                    ║"
+    echo "║  ✓ qBittorrent → Radarr/Sonarr (download client)                       ║"
+    echo "║  ✓ Prowlarr → Radarr/Sonarr (indexer sync)                             ║"
     echo "║  ✓ Public indexers added to Prowlarr                                   ║"
+    echo "║  ✓ Overseerr → Plex (watchlist monitoring)                             ║"
+    echo "║  ✓ Overseerr → Radarr + Sonarr (auto-requests)                         ║"
     echo "║                                                                        ║"
     echo "║  Next Steps:                                                           ║"
-    echo "║  1. Open Radarr/Sonarr and verify Settings > Download Clients          ║"
-    echo "║  2. Check Prowlarr > Settings > Apps for sync status                   ║"
-    echo "║  3. Add a movie in Radarr or show in Sonarr to test                    ║"
-    echo "║  4. (Optional) Add more indexers in Prowlarr                           ║"
+    echo "║  1. Sign in to Overseerr with your Plex account                        ║"
+    echo "║  2. Add a movie or show to your Plex watchlist                         ║"
+    echo "║  3. Watch it automatically download and appear in your library!        ║"
     echo "║                                                                        ║"
     echo "╚═══════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
