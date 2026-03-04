@@ -1,7 +1,7 @@
 #!/bin/bash
 #===============================================================================
 # Simplarr Pre-flight Validation Script (Bash)
-# 
+#
 # This script checks your system is ready to run the Simplarr stack.
 # Run this BEFORE running docker-compose to catch common issues early.
 #
@@ -81,7 +81,7 @@ info() {
 check_port() {
     local port=$1
     local service=$2
-    
+
     if command -v ss &> /dev/null; then
         if ss -tuln | grep -q ":${port} "; then
             return 1
@@ -91,7 +91,7 @@ check_port() {
             return 1
         fi
     elif command -v lsof &> /dev/null; then
-        if lsof -i :${port} &> /dev/null; then
+        if lsof -i :"${port}" &> /dev/null; then
             return 1
         fi
     else
@@ -105,7 +105,8 @@ check_port() {
 load_env_var() {
     local var_name=$1
     if [[ -f "$ENV_FILE" ]]; then
-        local value=$(grep "^${var_name}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'")
+        local value
+        value=$(grep "^${var_name}=" "$ENV_FILE" 2>/dev/null | cut -d'=' -f2- | tr -d '"' | tr -d "'")
         echo "$value"
     fi
 }
@@ -129,11 +130,11 @@ print_section "📦 Docker Installation"
 # Check if Docker is installed
 if command -v docker &> /dev/null; then
     pass "Docker is installed"
-    
+
     # Get Docker version
     DOCKER_VERSION=$(docker --version 2>/dev/null | head -n1)
     info "Version: ${DOCKER_VERSION}"
-    
+
     # Check if Docker daemon is running
     if docker info &> /dev/null; then
         pass "Docker daemon is running"
@@ -164,11 +165,11 @@ print_section "📋 Environment Configuration"
 
 if [[ -f "$ENV_FILE" ]]; then
     pass "Environment file exists: ${ENV_FILE}"
-    
+
     # Check for required variables
     REQUIRED_VARS=("DOCKER_CONFIG" "DOCKER_MEDIA" "PUID" "PGID" "TZ")
     PLACEHOLDER_VALUES=("your-" "change-me" "placeholder" "xxx" "CHANGEME")
-    
+
     for var in "${REQUIRED_VARS[@]}"; do
         value=$(load_env_var "$var")
         if [[ -z "$value" ]]; then
@@ -182,7 +183,7 @@ if [[ -f "$ENV_FILE" ]]; then
                     break
                 fi
             done
-            
+
             if $is_placeholder; then
                 fail "${var} contains placeholder value" "Replace the placeholder in ${ENV_FILE} with your actual value"
             else
@@ -207,7 +208,7 @@ DOCKER_MEDIA=$(load_env_var "DOCKER_MEDIA")
 if [[ -n "$DOCKER_CONFIG" ]]; then
     if [[ -d "$DOCKER_CONFIG" ]]; then
         pass "DOCKER_CONFIG directory exists: ${DOCKER_CONFIG}"
-        
+
         # Check if writable
         if [[ -w "$DOCKER_CONFIG" ]]; then
             pass "DOCKER_CONFIG is writable"
@@ -225,7 +226,7 @@ fi
 if [[ -n "$DOCKER_MEDIA" ]]; then
     if [[ -d "$DOCKER_MEDIA" ]]; then
         pass "DOCKER_MEDIA directory exists: ${DOCKER_MEDIA}"
-        
+
         # Check for required subdirectories
         SUBDIRS=("movies" "tv" "downloads")
         for subdir in "${SUBDIRS[@]}"; do
@@ -298,8 +299,6 @@ fi
 # SUMMARY
 #===============================================================================
 print_header "📊 Summary"
-
-TOTAL=$((PASS_COUNT + FAIL_COUNT + WARN_COUNT))
 
 echo ""
 echo -e "  ${GREEN}Passed:${NC}   ${PASS_COUNT}"
