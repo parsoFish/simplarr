@@ -86,7 +86,7 @@ wait_for_service() {
     local attempt=1
 
     log_info "Waiting for $name to be ready..."
-    
+
     while [ $attempt -le $max_attempts ]; do
         if curl -s -o /dev/null -w "%{http_code}" "${url}${endpoint}" | grep -q "200\|401\|302"; then
             log_success "$name is ready"
@@ -96,7 +96,7 @@ wait_for_service() {
         sleep 2
         attempt=$((attempt + 1))
     done
-    
+
     log_error "$name is not responding after $max_attempts attempts"
     return 1
 }
@@ -105,15 +105,16 @@ wait_for_service() {
 get_arr_api_key() {
     local name=$1
     local config_path=$2
-    
+
     if [ -f "$config_path" ]; then
-        local api_key=$(grep -oP '(?<=<ApiKey>)[^<]+' "$config_path" 2>/dev/null || echo "")
+        local api_key
+        api_key=$(grep -oP '(?<=<ApiKey>)[^<]+' "$config_path" 2>/dev/null || echo "")
         if [ -n "$api_key" ]; then
             echo "$api_key"
             return 0
         fi
     fi
-    
+
     log_error "Could not get API key for $name from $config_path"
     return 1
 }
@@ -121,22 +122,23 @@ get_arr_api_key() {
 # Get qBittorrent temporary password from docker logs
 get_qbittorrent_password() {
     local container_name="${1:-qbittorrent}"
-    
+
     if [ -n "$QB_PASSWORD" ]; then
         echo "$QB_PASSWORD"
         return 0
     fi
-    
+
     log_info "Retrieving qBittorrent temporary password from logs..."
-    
-    local password=$(docker logs "$container_name" 2>&1 | grep -oP 'temporary password[^:]*:\s*\K\S+' | tail -1)
-    
+
+    local password
+    password=$(docker logs "$container_name" 2>&1 | grep -oP 'temporary password[^:]*:\s*\K\S+' | tail -1)
+
     if [ -n "$password" ]; then
         log_success "Retrieved qBittorrent password"
         echo "$password"
         return 0
     fi
-    
+
     log_error "Could not retrieve qBittorrent password from logs"
     log_info "You can set QB_PASSWORD environment variable manually"
     return 1
@@ -149,40 +151,41 @@ get_qbittorrent_password() {
 # Add qBittorrent as download client to Radarr
 add_qbittorrent_to_radarr() {
     local api_key=$1
-    
+
     log_info "Adding qBittorrent to Radarr..."
-    
-    local response=$(curl -s -X POST "${RADARR_URL}/api/v3/downloadclient" \
+
+    local response
+    response=$(curl -s -X POST "${RADARR_URL}/api/v3/downloadclient" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "protocol": "torrent",
-            "priority": 1,
-            "removeCompletedDownloads": true,
-            "removeFailedDownloads": true,
-            "name": "qBittorrent",
-            "fields": [
-                {"name": "host", "value": "'${QBITTORRENT_HOST}'"},
-                {"name": "port", "value": 8080},
-                {"name": "useSsl", "value": false},
-                {"name": "urlBase", "value": ""},
-                {"name": "username", "value": "'${QB_USERNAME}'"},
-                {"name": "password", "value": "'${QB_PASSWORD}'"},
-                {"name": "movieCategory", "value": "radarr"},
-                {"name": "movieImportedCategory", "value": ""},
-                {"name": "recentMoviePriority", "value": 0},
-                {"name": "olderMoviePriority", "value": 0},
-                {"name": "initialState", "value": 0},
-                {"name": "sequentialOrder", "value": false},
-                {"name": "firstAndLast", "value": false}
+        -d "{
+            \"enable\": true,
+            \"protocol\": \"torrent\",
+            \"priority\": 1,
+            \"removeCompletedDownloads\": true,
+            \"removeFailedDownloads\": true,
+            \"name\": \"qBittorrent\",
+            \"fields\": [
+                {\"name\": \"host\", \"value\": \"${QBITTORRENT_HOST}\"},
+                {\"name\": \"port\", \"value\": 8080},
+                {\"name\": \"useSsl\", \"value\": false},
+                {\"name\": \"urlBase\", \"value\": \"\"},
+                {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
+                {\"name\": \"password\", \"value\": \"${QB_PASSWORD}\"},
+                {\"name\": \"movieCategory\", \"value\": \"radarr\"},
+                {\"name\": \"movieImportedCategory\", \"value\": \"\"},
+                {\"name\": \"recentMoviePriority\", \"value\": 0},
+                {\"name\": \"olderMoviePriority\", \"value\": 0},
+                {\"name\": \"initialState\", \"value\": 0},
+                {\"name\": \"sequentialOrder\", \"value\": false},
+                {\"name\": \"firstAndLast\", \"value\": false}
             ],
-            "implementationName": "qBittorrent",
-            "implementation": "QBittorrent",
-            "configContract": "QBittorrentSettings",
-            "tags": []
-        }')
-    
+            \"implementationName\": \"qBittorrent\",
+            \"implementation\": \"QBittorrent\",
+            \"configContract\": \"QBittorrentSettings\",
+            \"tags\": []
+        }")
+
     if echo "$response" | grep -q '"id"'; then
         log_success "qBittorrent added to Radarr"
         return 0
@@ -195,40 +198,41 @@ add_qbittorrent_to_radarr() {
 # Add qBittorrent as download client to Sonarr
 add_qbittorrent_to_sonarr() {
     local api_key=$1
-    
+
     log_info "Adding qBittorrent to Sonarr..."
-    
-    local response=$(curl -s -X POST "${SONARR_URL}/api/v3/downloadclient" \
+
+    local response
+    response=$(curl -s -X POST "${SONARR_URL}/api/v3/downloadclient" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "protocol": "torrent",
-            "priority": 1,
-            "removeCompletedDownloads": true,
-            "removeFailedDownloads": true,
-            "name": "qBittorrent",
-            "fields": [
-                {"name": "host", "value": "'${QBITTORRENT_HOST}'"},
-                {"name": "port", "value": 8080},
-                {"name": "useSsl", "value": false},
-                {"name": "urlBase", "value": ""},
-                {"name": "username", "value": "'${QB_USERNAME}'"},
-                {"name": "password", "value": "'${QB_PASSWORD}'"},
-                {"name": "tvCategory", "value": "sonarr"},
-                {"name": "tvImportedCategory", "value": ""},
-                {"name": "recentTvPriority", "value": 0},
-                {"name": "olderTvPriority", "value": 0},
-                {"name": "initialState", "value": 0},
-                {"name": "sequentialOrder", "value": false},
-                {"name": "firstAndLast", "value": false}
+        -d "{
+            \"enable\": true,
+            \"protocol\": \"torrent\",
+            \"priority\": 1,
+            \"removeCompletedDownloads\": true,
+            \"removeFailedDownloads\": true,
+            \"name\": \"qBittorrent\",
+            \"fields\": [
+                {\"name\": \"host\", \"value\": \"${QBITTORRENT_HOST}\"},
+                {\"name\": \"port\", \"value\": 8080},
+                {\"name\": \"useSsl\", \"value\": false},
+                {\"name\": \"urlBase\", \"value\": \"\"},
+                {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
+                {\"name\": \"password\", \"value\": \"${QB_PASSWORD}\"},
+                {\"name\": \"tvCategory\", \"value\": \"sonarr\"},
+                {\"name\": \"tvImportedCategory\", \"value\": \"\"},
+                {\"name\": \"recentTvPriority\", \"value\": 0},
+                {\"name\": \"olderTvPriority\", \"value\": 0},
+                {\"name\": \"initialState\", \"value\": 0},
+                {\"name\": \"sequentialOrder\", \"value\": false},
+                {\"name\": \"firstAndLast\", \"value\": false}
             ],
-            "implementationName": "qBittorrent",
-            "implementation": "QBittorrent",
-            "configContract": "QBittorrentSettings",
-            "tags": []
-        }')
-    
+            \"implementationName\": \"qBittorrent\",
+            \"implementation\": \"QBittorrent\",
+            \"configContract\": \"QBittorrentSettings\",
+            \"tags\": []
+        }")
+
     if echo "$response" | grep -q '"id"'; then
         log_success "qBittorrent added to Sonarr"
         return 0
@@ -242,27 +246,28 @@ add_qbittorrent_to_sonarr() {
 add_radarr_to_prowlarr() {
     local prowlarr_key=$1
     local radarr_key=$2
-    
+
     log_info "Adding Radarr to Prowlarr..."
-    
-    local response=$(curl -s -X POST "${PROWLARR_URL}/api/v1/applications" \
+
+    local response
+    response=$(curl -s -X POST "${PROWLARR_URL}/api/v1/applications" \
         -H "X-Api-Key: ${prowlarr_key}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "syncLevel": "fullSync",
-            "name": "Radarr",
-            "fields": [
-                {"name": "prowlarrUrl", "value": "http://'${PROWLARR_HOST}':9696"},
-                {"name": "baseUrl", "value": "http://'${RADARR_HOST}':7878"},
-                {"name": "apiKey", "value": "'${radarr_key}'"},
-                {"name": "syncCategories", "value": [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080]}
+        -d "{
+            \"syncLevel\": \"fullSync\",
+            \"name\": \"Radarr\",
+            \"fields\": [
+                {\"name\": \"prowlarrUrl\", \"value\": \"http://${PROWLARR_HOST}:9696\"},
+                {\"name\": \"baseUrl\", \"value\": \"http://${RADARR_HOST}:7878\"},
+                {\"name\": \"apiKey\", \"value\": \"${radarr_key}\"},
+                {\"name\": \"syncCategories\", \"value\": [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080]}
             ],
-            "implementationName": "Radarr",
-            "implementation": "Radarr",
-            "configContract": "RadarrSettings",
-            "tags": []
-        }')
-    
+            \"implementationName\": \"Radarr\",
+            \"implementation\": \"Radarr\",
+            \"configContract\": \"RadarrSettings\",
+            \"tags\": []
+        }")
+
     if echo "$response" | grep -q '"id"'; then
         log_success "Radarr added to Prowlarr"
         return 0
@@ -276,27 +281,28 @@ add_radarr_to_prowlarr() {
 add_sonarr_to_prowlarr() {
     local prowlarr_key=$1
     local sonarr_key=$2
-    
+
     log_info "Adding Sonarr to Prowlarr..."
-    
-    local response=$(curl -s -X POST "${PROWLARR_URL}/api/v1/applications" \
+
+    local response
+    response=$(curl -s -X POST "${PROWLARR_URL}/api/v1/applications" \
         -H "X-Api-Key: ${prowlarr_key}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "syncLevel": "fullSync",
-            "name": "Sonarr",
-            "fields": [
-                {"name": "prowlarrUrl", "value": "http://'${PROWLARR_HOST}':9696"},
-                {"name": "baseUrl", "value": "http://'${SONARR_HOST}':8989"},
-                {"name": "apiKey", "value": "'${sonarr_key}'"},
-                {"name": "syncCategories", "value": [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]}
+        -d "{
+            \"syncLevel\": \"fullSync\",
+            \"name\": \"Sonarr\",
+            \"fields\": [
+                {\"name\": \"prowlarrUrl\", \"value\": \"http://${PROWLARR_HOST}:9696\"},
+                {\"name\": \"baseUrl\", \"value\": \"http://${SONARR_HOST}:8989\"},
+                {\"name\": \"apiKey\", \"value\": \"${sonarr_key}\"},
+                {\"name\": \"syncCategories\", \"value\": [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]}
             ],
-            "implementationName": "Sonarr",
-            "implementation": "Sonarr",
-            "configContract": "SonarrSettings",
-            "tags": []
-        }')
-    
+            \"implementationName\": \"Sonarr\",
+            \"implementation\": \"Sonarr\",
+            \"configContract\": \"SonarrSettings\",
+            \"tags\": []
+        }")
+
     if echo "$response" | grep -q '"id"'; then
         log_success "Sonarr added to Prowlarr"
         return 0
@@ -309,16 +315,17 @@ add_sonarr_to_prowlarr() {
 # Add root folder to Radarr
 add_radarr_root_folder() {
     local api_key=$1
-    
+
     log_info "Adding root folder to Radarr..."
-    
-    local response=$(curl -s -X POST "${RADARR_URL}/api/v3/rootfolder" \
+
+    local response
+    response=$(curl -s -X POST "${RADARR_URL}/api/v3/rootfolder" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "path": "'${MOVIES_PATH}'"
-        }')
-    
+        -d "{
+            \"path\": \"${MOVIES_PATH}\"
+        }")
+
     if echo "$response" | grep -q '"id"'; then
         log_success "Root folder added to Radarr: ${MOVIES_PATH}"
         return 0
@@ -331,16 +338,17 @@ add_radarr_root_folder() {
 # Add root folder to Sonarr
 add_sonarr_root_folder() {
     local api_key=$1
-    
+
     log_info "Adding root folder to Sonarr..."
-    
-    local response=$(curl -s -X POST "${SONARR_URL}/api/v3/rootfolder" \
+
+    local response
+    response=$(curl -s -X POST "${SONARR_URL}/api/v3/rootfolder" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
-        -d '{
-            "path": "'${TV_PATH}'"
-        }')
-    
+        -d "{
+            \"path\": \"${TV_PATH}\"
+        }")
+
     if echo "$response" | grep -q '"id"'; then
         log_success "Root folder added to Sonarr: ${TV_PATH}"
         return 0
@@ -355,12 +363,12 @@ add_sonarr_root_folder() {
 #       or have Cloudflare protection. Add them manually in Prowlarr if needed.
 add_public_indexers() {
     local api_key=$1
-    
+
     log_info "Adding public indexers to Prowlarr..."
     log_info "Note: Some indexers may fail due to geo-blocking or Cloudflare protection"
-    
+
     # YTS
-    curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d '{
@@ -378,10 +386,14 @@ add_public_indexers() {
             "tags": [],
             "priority": 25,
             "appProfileId": 1
-        }' >/dev/null 2>&1 && log_success "Added YTS" || log_warn "YTS may already exist"
-    
+        }' >/dev/null 2>&1; then
+        log_success "Added YTS"
+    else
+        log_warn "YTS may already exist"
+    fi
+
     # The Pirate Bay
-    curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d '{
@@ -399,10 +411,14 @@ add_public_indexers() {
             "tags": [],
             "priority": 25,
             "appProfileId": 1
-        }' >/dev/null 2>&1 && log_success "Added The Pirate Bay" || log_warn "TPB may already exist"
-    
+        }' >/dev/null 2>&1; then
+        log_success "Added The Pirate Bay"
+    else
+        log_warn "TPB may already exist"
+    fi
+
     # TorrentGalaxy
-    curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d '{
@@ -420,10 +436,14 @@ add_public_indexers() {
             "tags": [],
             "priority": 25,
             "appProfileId": 1
-        }' >/dev/null 2>&1 && log_success "Added TorrentGalaxy" || log_warn "TorrentGalaxy may already exist"
-    
+        }' >/dev/null 2>&1; then
+        log_success "Added TorrentGalaxy"
+    else
+        log_warn "TorrentGalaxy may already exist"
+    fi
+
     # Nyaa (anime)
-    curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d '{
@@ -441,10 +461,14 @@ add_public_indexers() {
             "tags": [],
             "priority": 25,
             "appProfileId": 1
-        }' >/dev/null 2>&1 && log_success "Added Nyaa.si" || log_warn "Nyaa may already exist"
-    
+        }' >/dev/null 2>&1; then
+        log_success "Added Nyaa.si"
+    else
+        log_warn "Nyaa may already exist"
+    fi
+
     # LimeTorrents
-    curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d '{
@@ -462,20 +486,24 @@ add_public_indexers() {
             "tags": [],
             "priority": 25,
             "appProfileId": 1
-        }' >/dev/null 2>&1 && log_success "Added LimeTorrents" || log_warn "LimeTorrents may already exist"
+        }' >/dev/null 2>&1; then
+        log_success "Added LimeTorrents"
+    else
+        log_warn "LimeTorrents may already exist"
+    fi
 }
 
 # Trigger Prowlarr to sync indexers to apps
 sync_prowlarr_indexers() {
     local api_key=$1
-    
+
     log_info "Triggering Prowlarr indexer sync..."
-    
+
     curl -s -X POST "${PROWLARR_URL}/api/v1/command" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d '{"name": "ApplicationIndexerSync"}' >/dev/null 2>&1
-    
+
     log_success "Indexer sync triggered"
 }
 
@@ -487,21 +515,22 @@ sync_prowlarr_indexers() {
 # Get Overseerr API key from settings.json
 get_overseerr_api_key() {
     log_info "Retrieving Overseerr API key..."
-    
+
     local settings_path="${DOCKER_CONFIG}/overseerr/settings.json"
-    
+
     if [ ! -f "$settings_path" ]; then
         log_error "Overseerr settings.json not found. User must sign in with Plex first."
         return 1
     fi
-    
-    local api_key=$(grep -o '"apiKey":"[^"]*"' "$settings_path" | cut -d'"' -f4)
-    
+
+    local api_key
+    api_key=$(grep -o '"apiKey":"[^"]*"' "$settings_path" | cut -d'"' -f4)
+
     if [ -z "$api_key" ]; then
         log_error "Overseerr API key not found in settings"
         return 1
     fi
-    
+
     log_success "Overseerr API key retrieved"
     echo "$api_key"
     return 0
@@ -509,9 +538,10 @@ get_overseerr_api_key() {
 
 initialize_overseerr() {
     log_info "Checking Overseerr initialization status..."
-    
-    local status_response=$(curl -s "${OVERSEERR_URL}/api/v1/status")
-    
+
+    local status_response
+    status_response=$(curl -s "${OVERSEERR_URL}/api/v1/status")
+
     if echo "$status_response" | grep -q '"initialized":true'; then
         log_info "Overseerr is already initialized"
         return 0
@@ -525,24 +555,28 @@ initialize_overseerr() {
 add_radarr_to_overseerr() {
     local radarr_api_key=$1
     local overseerr_api_key=$2
-    
+
     log_info "Adding Radarr to Overseerr..."
-    
+
     # Get Radarr quality profiles
-    local profiles=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
+    local profiles
+    profiles=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
         "${RADARR_URL}/api/v3/qualityprofile")
-    local profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-    
+    local profile_id
+    profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+
     # Get Radarr root folders
-    local root_folders=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
+    local root_folders
+    root_folders=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
         "${RADARR_URL}/api/v3/rootfolder")
-    local root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
-    
+    local root_path
+    root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
+
     if [ -z "$profile_id" ] || [ -z "$root_path" ]; then
         log_error "Failed to get Radarr configuration"
         return 1
     fi
-    
+
     local radarr_config="{
         \"name\": \"Radarr\",
         \"hostname\": \"${RADARR_HOST}\",
@@ -558,12 +592,13 @@ add_radarr_to_overseerr() {
         \"externalUrl\": \"\",
         \"syncEnabled\": true
     }"
-    
-    local response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
+
+    local response
+    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
         -H "Content-Type: application/json" \
         -H "X-Api-Key: ${overseerr_api_key}" \
         -d "$radarr_config")
-    
+
     if echo "$response" | grep -q '"id"'; then
         log_success "Radarr added to Overseerr"
         return 0
@@ -577,24 +612,28 @@ add_radarr_to_overseerr() {
 add_sonarr_to_overseerr() {
     local sonarr_api_key=$1
     local overseerr_api_key=$2
-    
+
     log_info "Adding Sonarr to Overseerr..."
-    
+
     # Get Sonarr quality profiles
-    local profiles=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
+    local profiles
+    profiles=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
         "${SONARR_URL}/api/v3/qualityprofile")
-    local profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
-    
+    local profile_id
+    profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+
     # Get Sonarr root folders
-    local root_folders=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
+    local root_folders
+    root_folders=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
         "${SONARR_URL}/api/v3/rootfolder")
-    local root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
-    
+    local root_path
+    root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
+
     if [ -z "$profile_id" ] || [ -z "$root_path" ]; then
         log_error "Failed to get Sonarr configuration"
         return 1
     fi
-    
+
     local sonarr_config="{
         \"name\": \"Sonarr\",
         \"hostname\": \"${SONARR_HOST}\",
@@ -610,12 +649,13 @@ add_sonarr_to_overseerr() {
         \"externalUrl\": \"\",
         \"syncEnabled\": true
     }"
-    
-    local response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
+
+    local response
+    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
         -H "Content-Type: application/json" \
         -H "X-Api-Key: ${overseerr_api_key}" \
         -d "$sonarr_config")
-    
+
     if echo "$response" | grep -q '"id"'; then
         log_success "Sonarr added to Overseerr"
         return 0
@@ -628,23 +668,26 @@ add_sonarr_to_overseerr() {
 # Enable Plex watchlist sync in Overseerr
 enable_overseerr_watchlist_sync() {
     local overseerr_api_key=$1
-    
+
     log_info "Enabling Overseerr watchlist sync..."
-    
+
     # Get current settings
-    local current_settings=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" \
+    local current_settings
+    current_settings=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" \
         "${OVERSEERR_URL}/api/v1/settings/main")
-    
+
     # Update with watchlist sync enabled
-    local updated_settings=$(echo "$current_settings" | \
+    local updated_settings
+    updated_settings=$(echo "$current_settings" | \
         sed 's/"autoApproveMovie":[^,]*/"autoApproveMovie":true/' | \
         sed 's/"autoApproveSeries":[^,]*/"autoApproveSeries":true/')
-    
-    local response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/main" \
+
+    local response
+    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/main" \
         -H "Content-Type: application/json" \
         -H "X-Api-Key: ${overseerr_api_key}" \
         -d "$updated_settings")
-    
+
     if echo "$response" | grep -q '"autoApproveMovie":true'; then
         log_success "Watchlist sync enabled with auto-approval"
         return 0
@@ -661,23 +704,23 @@ enable_overseerr_watchlist_sync() {
 main() {
     echo ""
     log_info "Checking for required tools..."
-    
+
     if ! command -v curl &> /dev/null; then
         log_error "curl is required but not installed. Please install it first."
         exit 1
     fi
-    
+
     if ! command -v grep &> /dev/null; then
         log_error "grep is required but not installed. Please install it first."
         exit 1
     fi
-    
+
     log_success "Required tools found"
     echo ""
-    
+
     # Get config directory from environment or use default
     CONFIG_DIR="${CONFIG_DIR:-${DOCKER_CONFIG:-./configs}}"
-    
+
     # Check if we should use local config files or wait for services
     if [ -f "${CONFIG_DIR}/radarr/config.xml" ]; then
         log_info "Found local config files, extracting API keys..."
@@ -686,83 +729,83 @@ main() {
         PROWLARR_API_KEY=$(get_arr_api_key "Prowlarr" "${CONFIG_DIR}/prowlarr/config.xml")
     else
         log_info "Waiting for services to generate configs..."
-        
+
         # Wait for services to be ready
         wait_for_service "Radarr" "$RADARR_URL" "/api/v3/system/status"
         wait_for_service "Sonarr" "$SONARR_URL" "/api/v3/system/status"
         wait_for_service "Prowlarr" "$PROWLARR_URL" "/api/v1/system/status"
         wait_for_service "qBittorrent" "$QBITTORRENT_URL" "/"
-        
+
         echo ""
         log_warn "Services are running but API keys need to be provided."
         echo ""
-        read -p "Enter Radarr API key (from Settings > General): " RADARR_API_KEY
-        read -p "Enter Sonarr API key (from Settings > General): " SONARR_API_KEY
-        read -p "Enter Prowlarr API key (from Settings > General): " PROWLARR_API_KEY
+        read -rp "Enter Radarr API key (from Settings > General): " RADARR_API_KEY
+        read -rp "Enter Sonarr API key (from Settings > General): " SONARR_API_KEY
+        read -rp "Enter Prowlarr API key (from Settings > General): " PROWLARR_API_KEY
     fi
-    
+
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}                    Configuring Download Clients${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     # Get qBittorrent password from logs if not provided
     QB_PASSWORD=$(get_qbittorrent_password "qbittorrent")
     if [ -z "$QB_PASSWORD" ]; then
         log_warn "Could not retrieve qBittorrent password automatically."
         log_info "Please check: docker logs qbittorrent 2>&1 | grep -i password"
-        read -p "Enter qBittorrent WebUI password: " QB_PASSWORD
+        read -rp "Enter qBittorrent WebUI password: " QB_PASSWORD
     fi
-    
+
     add_qbittorrent_to_radarr "$RADARR_API_KEY"
     add_qbittorrent_to_sonarr "$SONARR_API_KEY"
-    
+
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}                    Configuring Root Folders${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     add_radarr_root_folder "$RADARR_API_KEY"
     add_sonarr_root_folder "$SONARR_API_KEY"
-    
+
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}                    Configuring Prowlarr Connections${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     add_radarr_to_prowlarr "$PROWLARR_API_KEY" "$RADARR_API_KEY"
     add_sonarr_to_prowlarr "$PROWLARR_API_KEY" "$SONARR_API_KEY"
-    
+
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}                    Adding Public Indexers${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     add_public_indexers "$PROWLARR_API_KEY"
-    
+
     echo ""
     log_info "Waiting 5 seconds for indexers to be added..."
     sleep 5
-    
+
     sync_prowlarr_indexers "$PROWLARR_API_KEY"
-    
+
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}                    Configuring Overseerr${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
-    
+
     wait_for_service "Overseerr" "$OVERSEERR_URL" "/api/v1/status"
-    
+
     if ! initialize_overseerr; then
         log_error "Overseerr is not initialized. Please sign in with your Plex account at $OVERSEERR_URL"
         echo "Complete the Overseerr sign-in, then press Enter to continue."
         echo "Or type 'skip' to skip Overseerr configuration for now."
-        read -p "Continue: " overseerr_choice
+        read -rp "Continue: " overseerr_choice
         if [[ "$overseerr_choice" =~ ^(skip|s)$ ]]; then
             log_warn "Skipping Overseerr configuration"
         elif ! initialize_overseerr; then
@@ -772,20 +815,20 @@ main() {
 
     if initialize_overseerr; then
         log_info "Overseerr is initialized, configuring services..."
-        
+
         overseerr_api_key=$(get_overseerr_api_key)
-        
+
         if [ -z "$overseerr_api_key" ]; then
             log_error "Could not retrieve Overseerr API key - skipping Overseerr configuration"
         else
             add_radarr_to_overseerr "$RADARR_API_KEY" "$overseerr_api_key"
             add_sonarr_to_overseerr "$SONARR_API_KEY" "$overseerr_api_key"
             enable_overseerr_watchlist_sync "$overseerr_api_key"
-            
+
             log_success "Overseerr configuration complete!"
         fi
     fi
-    
+
     echo ""
     echo -e "${GREEN}"
     echo "╔═══════════════════════════════════════════════════════════════════════╗"

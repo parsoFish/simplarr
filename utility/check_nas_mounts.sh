@@ -119,7 +119,7 @@ if [ "$REMOUNT_NEEDED" = true ]; then
 
         # Restart Docker containers that depend on the mounts
         log_message "Restarting Docker containers to refresh mount connections..."
-        cd "$DOCKER_COMPOSE_DIR"
+        cd "$DOCKER_COMPOSE_DIR" || exit 1
         docker-compose down 2>&1 | tee -a "$LOG_FILE"
         sleep 3
         docker-compose up -d 2>&1 | tee -a "$LOG_FILE"

@@ -13,6 +13,10 @@
 #   2 - Warnings only (stack may work but with issues)
 #===============================================================================
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingWriteHost', '',
+    Justification = 'This interactive pre-flight script intentionally uses Write-Host for colored console output. Write-Output cannot produce the colored terminal UI required for the user experience.'
+)]
 [CmdletBinding()]
 param(
     [Parameter()]
@@ -64,7 +68,7 @@ function Write-ColorOutput {
     Write-Host $Message -ForegroundColor $ForegroundColor
 }
 
-function Print-Header {
+function Show-ScriptHeader {
     param([string]$Title)
     Write-Host ""
     Write-Host ("=" * 78) -ForegroundColor Cyan
@@ -72,7 +76,7 @@ function Print-Header {
     Write-Host ("=" * 78) -ForegroundColor Cyan
 }
 
-function Print-Section {
+function Show-ScriptSection {
     param([string]$Title)
     Write-Host ""
     Write-Host $Title -ForegroundColor White -NoNewline
@@ -172,7 +176,7 @@ function Test-IsPlaceholder {
 # Main Script
 #-------------------------------------------------------------------------------
 
-Print-Header "Simplarr Pre-flight Validation"
+Show-ScriptHeader "Simplarr Pre-flight Validation"
 
 Write-Host ""
 Info "Running pre-flight checks for Simplarr..."
@@ -183,7 +187,7 @@ Info "PowerShell Version: $($PSVersionTable.PSVersion)"
 #===============================================================================
 # 1. DOCKER INSTALLATION CHECK
 #===============================================================================
-Print-Section "Docker Installation"
+Show-ScriptSection "Docker Installation"
 
 # Check if Docker is installed
 $dockerCmd = Get-Command docker -ErrorAction SilentlyContinue
@@ -201,7 +205,7 @@ if ($dockerCmd) {
     
     # Check if Docker daemon is running
     try {
-        $dockerInfo = docker info 2>$null
+        $null = docker info 2>$null
         if ($LASTEXITCODE -eq 0) {
             Pass "Docker daemon is running"
         }
@@ -237,7 +241,9 @@ catch {
             $legacyVersion = docker-compose --version 2>$null
             Info "Version: $legacyVersion"
         }
-        catch { }
+        catch {
+            Write-Verbose "Could not retrieve legacy docker-compose version"
+        }
     }
     else {
         Fail "Docker Compose is not available" "Install Docker Desktop which includes Docker Compose"
@@ -247,7 +253,7 @@ catch {
 #===============================================================================
 # 2. ENVIRONMENT FILE CHECK
 #===============================================================================
-Print-Section "Environment Configuration"
+Show-ScriptSection "Environment Configuration"
 
 if (Test-Path $EnvFile) {
     Pass "Environment file exists: $EnvFile"
@@ -274,7 +280,7 @@ else {
 #===============================================================================
 # 3. PATH VALIDATION
 #===============================================================================
-Print-Section "Path Validation"
+Show-ScriptSection "Path Validation"
 
 $dockerConfig = Get-EnvVariable -VarName "DOCKER_CONFIG"
 $dockerMedia = Get-EnvVariable -VarName "DOCKER_MEDIA"
@@ -330,7 +336,7 @@ else {
 #===============================================================================
 # 4. PORT AVAILABILITY CHECK
 #===============================================================================
-Print-Section "Port Availability"
+Show-ScriptSection "Port Availability"
 
 foreach ($port in $PortsToCheck.Keys | Sort-Object) {
     $service = $PortsToCheck[$port]
@@ -346,12 +352,12 @@ foreach ($port in $PortsToCheck.Keys | Sort-Object) {
 #===============================================================================
 # 5. NETWORK CONNECTIVITY CHECK
 #===============================================================================
-Print-Section "Network Connectivity"
+Show-ScriptSection "Network Connectivity"
 
 # Check Docker Hub connectivity
 Info "Testing Docker Hub connectivity..."
 try {
-    $pullResult = docker pull hello-world 2>&1
+    $null = docker pull hello-world 2>&1
     if ($LASTEXITCODE -eq 0) {
         Pass "Can connect to Docker Hub"
         # Clean up the test image
@@ -368,7 +374,8 @@ catch {
 # Check general internet connectivity
 Info "Testing internet connectivity..."
 try {
-    $ping = Test-Connection -ComputerName "8.8.8.8" -Count 1 -Quiet -ErrorAction SilentlyContinue
+    $connectivityTestHost = "8.8.8.8"
+    $ping = Test-Connection -ComputerName $connectivityTestHost -Count 1 -Quiet -ErrorAction SilentlyContinue
     if ($ping) {
         Pass "Internet connectivity OK"
     }
@@ -383,7 +390,7 @@ catch {
 #===============================================================================
 # SUMMARY
 #===============================================================================
-Print-Header "Summary"
+Show-ScriptHeader "Summary"
 
 Write-Host ""
 Write-Host "  Passed:   " -NoNewline

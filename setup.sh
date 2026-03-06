@@ -63,14 +63,13 @@ print_hint() {
 # Validate path exists or offer to create
 validate_path() {
     local path="$1"
-    local description="$2"
-    
+
     if [[ -d "$path" ]]; then
         print_success "Path exists: $path"
         return 0
     else
         print_warning "Path does not exist: $path"
-        read -p "  Would you like to create it? (y/n): " create_choice
+        read -rp "  Would you like to create it? (y/n): " create_choice
         if [[ "$create_choice" =~ ^[Yy]$ ]]; then
             if mkdir -p "$path" 2>/dev/null; then
                 print_success "Created directory: $path"
@@ -90,6 +89,7 @@ validate_path() {
 load_existing_env() {
     if [[ -f "$ENV_FILE" ]]; then
         print_info "Found existing .env file. Loading current values as defaults..."
+        # shellcheck source=/dev/null
         source "$ENV_FILE" 2>/dev/null
         return 0
     fi
@@ -118,7 +118,7 @@ echo -e "     Best for: NAS handles Plex/downloads, Pi/server handles automation
 echo ""
 
 while true; do
-    read -p "  Select setup type (1 or 2) [1]: " setup_type_input
+    read -rp "  Select setup type (1 or 2) [1]: " setup_type_input
     setup_type_input="${setup_type_input:-1}"
     if [[ "$setup_type_input" == "1" ]]; then
         SETUP_TYPE="unified"
@@ -141,9 +141,9 @@ if [[ "$SETUP_TYPE" == "split" ]]; then
     echo -e "  ${CYAN}1) NAS${NC} - Will run Plex and qBittorrent"
     echo -e "  ${CYAN}2) Pi/Server${NC} - Will run Radarr, Sonarr, Prowlarr, etc."
     echo ""
-    
+
     while true; do
-        read -p "  Select device (1 or 2): " device_input
+        read -rp "  Select device (1 or 2): " device_input
         if [[ "$device_input" == "1" ]]; then
             SPLIT_DEVICE="nas"
             print_success "Configuring: NAS (Plex + qBittorrent)"
@@ -161,7 +161,7 @@ fi
 # Check for existing .env
 if [[ -f "$ENV_FILE" ]]; then
     echo -e "${YELLOW}An existing .env file was found.${NC}"
-    read -p "Would you like to update it? (y/n): " update_choice
+    read -rp "Would you like to update it? (y/n): " update_choice
     if [[ ! "$update_choice" =~ ^[Yy]$ ]]; then
         echo -e "${CYAN}Setup cancelled. Your existing .env file was not modified.${NC}"
         exit 0
@@ -183,7 +183,7 @@ current_uid=$(id -u 2>/dev/null || echo "1000")
 default_puid="${PUID:-$current_uid}"
 
 echo ""
-read -p "  Enter PUID [$default_puid]: " input_puid
+read -rp "  Enter PUID [$default_puid]: " input_puid
 PUID="${input_puid:-$default_puid}"
 print_success "PUID set to: $PUID"
 
@@ -200,7 +200,7 @@ current_gid=$(id -g 2>/dev/null || echo "1000")
 default_pgid="${PGID:-$current_gid}"
 
 echo ""
-read -p "  Enter PGID [$default_pgid]: " input_pgid
+read -rp "  Enter PGID [$default_pgid]: " input_pgid
 PGID="${input_pgid:-$default_pgid}"
 print_success "PGID set to: $PGID"
 
@@ -222,7 +222,7 @@ print_hint "Full list: https://en.wikipedia.org/wiki/List_of_tz_database_time_zo
 default_tz="${TZ:-America/New_York}"
 
 echo ""
-read -p "  Enter Timezone [$default_tz]: " input_tz
+read -rp "  Enter Timezone [$default_tz]: " input_tz
 TZ="${input_tz:-$default_tz}"
 print_success "Timezone set to: $TZ"
 
@@ -239,7 +239,7 @@ print_hint "Example: /home/user/docker or /opt/docker-config"
 default_config="${DOCKER_CONFIG:-}"
 
 echo ""
-read -p "  Enter config path${default_config:+ [$default_config]}: " input_config
+read -rp "  Enter config path${default_config:+ [$default_config]}: " input_config
 DOCKER_CONFIG="${input_config:-$default_config}"
 
 if [[ -z "$DOCKER_CONFIG" ]]; then
@@ -247,7 +247,7 @@ if [[ -z "$DOCKER_CONFIG" ]]; then
     exit 1
 fi
 
-validate_path "$DOCKER_CONFIG" "config" || exit 1
+validate_path "$DOCKER_CONFIG" || exit 1
 
 # =============================================================================
 # Docker Media Path
@@ -265,7 +265,7 @@ print_hint "Example: /mnt/media or /home/user/media"
 default_media="${DOCKER_MEDIA:-}"
 
 echo ""
-read -p "  Enter media path${default_media:+ [$default_media]}: " input_media
+read -rp "  Enter media path${default_media:+ [$default_media]}: " input_media
 DOCKER_MEDIA="${input_media:-$default_media}"
 
 if [[ -z "$DOCKER_MEDIA" ]]; then
@@ -273,7 +273,7 @@ if [[ -z "$DOCKER_MEDIA" ]]; then
     exit 1
 fi
 
-validate_path "$DOCKER_MEDIA" "media" || exit 1
+validate_path "$DOCKER_MEDIA" || exit 1
 
 # Check/create subdirectories
 echo ""
@@ -283,7 +283,7 @@ for subdir in movies tv downloads; do
     if [[ -d "$subpath" ]]; then
         print_success "Found: $subpath"
     else
-        read -p "  Create $subdir directory? (y/n): " create_sub
+        read -rp "  Create $subdir directory? (y/n): " create_sub
         if [[ "$create_sub" =~ ^[Yy]$ ]]; then
             mkdir -p "$subpath" && print_success "Created: $subpath"
         fi
@@ -311,7 +311,7 @@ print_hint "You can leave this blank and add it later to .env before first run"
 default_claim="${PLEX_CLAIM:-}"
 
 echo ""
-read -p "  Enter Plex Claim Token (or press Enter to skip): " input_claim
+read -rp "  Enter Plex Claim Token (or press Enter to skip): " input_claim
 PLEX_CLAIM="${input_claim:-$default_claim}"
 
 if [[ -n "$PLEX_CLAIM" ]]; then
@@ -330,14 +330,14 @@ fi
 
 if [[ "$SETUP_TYPE" == "split" && "$SPLIT_DEVICE" == "pi" ]]; then
     print_section "NAS IP Address"
-    
+
     echo -e "  Enter the IP address of your NAS."
     echo -e "  This is needed so the reverse proxy can reach Plex and qBittorrent."
     print_hint "Example: 192.168.1.100 or 10.0.0.50"
-    
+
     echo ""
     while true; do
-        read -p "  Enter NAS IP address: " NAS_IP
+        read -rp "  Enter NAS IP address: " NAS_IP
         # Basic IP validation
         if [[ "$NAS_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             print_success "NAS IP set to: $NAS_IP"
@@ -368,7 +368,7 @@ fi
 echo ""
 
 echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-read -p "  Save this configuration to .env? (y/n): " save_choice
+read -rp "  Save this configuration to .env? (y/n): " save_choice
 
 if [[ ! "$save_choice" =~ ^[Yy]$ ]]; then
     echo -e "${YELLOW}Setup cancelled. No changes were made.${NC}"

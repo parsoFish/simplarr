@@ -3,7 +3,7 @@ services:
   # Media Server
   # ===================
   plex:
-    image: linuxserver/plex:latest
+    image: linuxserver/plex:1.43.0.10492-121068a07-ls295
     container_name: plex
     network_mode: host
     environment:
@@ -28,7 +28,7 @@ services:
   # Download Client
   # ===================
   qbittorrent:
-    image: linuxserver/qbittorrent:latest
+    image: linuxserver/qbittorrent:5.1.4-r2-ls443
     container_name: qbittorrent
     ports:
       - 8080:8080
@@ -54,7 +54,7 @@ services:
   # Media Management
   # ===================
   radarr:
-    image: linuxserver/radarr:latest
+    image: linuxserver/radarr:6.0.4.10291-ls294
     container_name: radarr
     ports:
       - 7878:7878
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
 
   sonarr:
-    image: linuxserver/sonarr:latest
+    image: linuxserver/sonarr:4.0.16.2944-ls303
     container_name: sonarr
     ports:
       - 8989:8989
@@ -96,7 +96,7 @@ services:
     restart: unless-stopped
 
   prowlarr:
-    image: linuxserver/prowlarr:latest
+    image: linuxserver/prowlarr:2.3.0.5236-ls138
     container_name: prowlarr
     ports:
       - 9696:9696
@@ -118,7 +118,7 @@ services:
   # Requests & Monitoring
   # ===================
   overseerr:
-    image: sctx/overseerr:latest
+    image: sctx/overseerr:1.35.0
     container_name: overseerr
     ports:
       - 5055:5055
@@ -136,7 +136,7 @@ services:
     restart: unless-stopped
 
   tautulli:
-    image: linuxserver/tautulli:latest
+    image: linuxserver/tautulli:v2.16.1-ls217
     container_name: tautulli
     ports:
       - 8181:8181
@@ -158,7 +158,7 @@ services:
   # Reverse Proxy & Homepage
   # ===================
   nginx:
-    image: nginx:latest
+    image: nginx:1.28.2-alpine3.23
     container_name: nginx
     ports:
       - "80:80"
@@ -218,7 +218,7 @@ networks:
 # =============================================================================
 
 #  gluetun:
-#    image: qmcgaw/gluetun:latest
+#    image: qmcgaw/gluetun:v3.41.1
 #    container_name: gluetun
 #    cap_add:
 #      - NET_ADMIN
@@ -258,7 +258,7 @@ networks:
 # When enabling VPN, replace the qbittorrent service above with this version:
 # -----------------------------------------------------------------------------
 #  qbittorrent:
-#    image: linuxserver/qbittorrent:latest
+#    image: linuxserver/qbittorrent:5.1.4-r2-ls443
 #    container_name: qbittorrent
 #    network_mode: "service:gluetun"
 #    environment:

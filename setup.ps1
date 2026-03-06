@@ -1,9 +1,15 @@
-# =============================================================================
+﻿# =============================================================================
 # Simplarr - Interactive Setup Script (PowerShell)
 # =============================================================================
 # This script will help you configure your .env file for the media server stack
 # Compatible with Windows PowerShell 5.1+ and PowerShell Core 7+
 # =============================================================================
+
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingWriteHost', '',
+    Justification = 'This interactive setup script intentionally uses Write-Host for colored console output. Write-Output cannot produce the colored terminal UI required for the user experience.'
+)]
+param()
 
 # Ensure we're running with proper encoding
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -48,13 +54,13 @@ function Write-Success {
     Write-Host $Message
 }
 
-function Write-Warning {
+function Write-WarningMessage {
     param([string]$Message)
     Write-Host "[!] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
 }
 
-function Write-Error {
+function Write-ErrorMessage {
     param([string]$Message)
     Write-Host "[X] " -ForegroundColor Red -NoNewline
     Write-Host $Message
@@ -84,24 +90,23 @@ function Read-UserInput {
         $fullPrompt = "  ${Prompt}: "
     }
     
-    $input = Read-Host $fullPrompt
-    if ([string]::IsNullOrWhiteSpace($input)) {
+    $userInput = Read-Host $fullPrompt
+    if ([string]::IsNullOrWhiteSpace($userInput)) {
         return $Default
     }
-    return $input
+    return $userInput
 }
 
 function Test-PathAndCreate {
     param(
-        [string]$Path,
-        [string]$Description
+        [string]$Path
     )
     
     if (Test-Path $Path -PathType Container) {
         Write-Success "Path exists: $Path"
         return $true
     } else {
-        Write-Warning "Path does not exist: $Path"
+        Write-WarningMessage "Path does not exist: $Path"
         $choice = Read-Host "  Would you like to create it? (y/n)"
         if ($choice -match '^[Yy]$') {
             try {
@@ -109,17 +114,17 @@ function Test-PathAndCreate {
                 Write-Success "Created directory: $Path"
                 return $true
             } catch {
-                Write-Error "Failed to create directory. Please check permissions."
+                Write-ErrorMessage "Failed to create directory. Please check permissions."
                 return $false
             }
         } else {
-            Write-Error "Path is required. Please create it manually and re-run setup."
+            Write-ErrorMessage "Path is required. Please create it manually and re-run setup."
             return $false
         }
     }
 }
 
-function Load-ExistingEnv {
+function Import-ExistingEnv {
     param([string]$FilePath)
     
     $envVars = @{}
@@ -203,7 +208,7 @@ if (Test-Path $EnvFile) {
         Write-Host "Setup cancelled. Your existing .env file was not modified." -ForegroundColor Cyan
         exit 0
     }
-    $existingEnv = Load-ExistingEnv -FilePath $EnvFile
+    $existingEnv = Import-ExistingEnv -FilePath $EnvFile
     Write-Host ""
 }
 
@@ -282,11 +287,11 @@ Write-Host ""
 $DOCKER_CONFIG = Read-UserInput -Prompt "Enter config path" -Default $defaultConfig
 
 if ([string]::IsNullOrWhiteSpace($DOCKER_CONFIG)) {
-    Write-Error "Config path is required!"
+    Write-ErrorMessage "Config path is required!"
     exit 1
 }
 
-if (-not (Test-PathAndCreate -Path $DOCKER_CONFIG -Description "config")) {
+if (-not (Test-PathAndCreate -Path $DOCKER_CONFIG)) {
     exit 1
 }
 
@@ -312,11 +317,11 @@ Write-Host ""
 $DOCKER_MEDIA = Read-UserInput -Prompt "Enter media path" -Default $defaultMedia
 
 if ([string]::IsNullOrWhiteSpace($DOCKER_MEDIA)) {
-    Write-Error "Media path is required!"
+    Write-ErrorMessage "Media path is required!"
     exit 1
 }
 
-if (-not (Test-PathAndCreate -Path $DOCKER_MEDIA -Description "media")) {
+if (-not (Test-PathAndCreate -Path $DOCKER_MEDIA)) {
     exit 1
 }
 
@@ -335,7 +340,7 @@ foreach ($subdir in @("movies", "tv", "downloads")) {
                 New-Item -ItemType Directory -Path $subpath -Force | Out-Null
                 Write-Success "Created: $subpath"
             } catch {
-                Write-Warning "Could not create: $subpath"
+                Write-WarningMessage "Could not create: $subpath"
             }
         }
     }
@@ -369,10 +374,10 @@ if (-not [string]::IsNullOrWhiteSpace($PLEX_CLAIM)) {
     if ($PLEX_CLAIM.StartsWith("claim-")) {
         Write-Success "Plex claim token set"
     } else {
-        Write-Warning "Token doesn't start with 'claim-' - please verify it's correct"
+        Write-WarningMessage "Token doesn't start with 'claim-' - please verify it's correct"
     }
 } else {
-    Write-Warning "No claim token set. Remember to add it before starting Plex!"
+    Write-WarningMessage "No claim token set. Remember to add it before starting Plex!"
 }
 
 # =============================================================================
@@ -394,7 +399,7 @@ if ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi") {
             Write-Success "NAS IP set to: $NAS_IP"
             break
         } else {
-            Write-Error "Please enter a valid IP address (e.g., 192.168.1.100)"
+            Write-ErrorMessage "Please enter a valid IP address (e.g., 192.168.1.100)"
         }
     }
 }
@@ -515,11 +520,11 @@ if (Test-Path $qbitTemplate) {
         Write-Info "  -> Max active downloads: 50"
         Write-Info "  -> DHT/PeX/LSD: ENABLED"
     } else {
-        Write-Warning "qBittorrent config already exists, skipping template deployment"
+        Write-WarningMessage "qBittorrent config already exists, skipping template deployment"
         Write-Hint "Delete $qbitConfig to use the template on next setup"
     }
 } else {
-    Write-Warning "qBittorrent template not found at: $qbitTemplate"
+    Write-WarningMessage "qBittorrent template not found at: $qbitTemplate"
 }
 
 # Create incomplete downloads directory
@@ -540,7 +545,7 @@ if ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi" -and -not [string]::IsNu
         $content | Out-File -FilePath $splitConf -Encoding utf8 -Force -NoNewline
         Write-Success "Updated nginx/split.conf with NAS IP: $NAS_IP"
     } else {
-        Write-Warning "nginx/split.conf not found - you may need to update it manually"
+        Write-WarningMessage "nginx/split.conf not found - you may need to update it manually"
     }
 }
 

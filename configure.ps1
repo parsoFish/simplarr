@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Simplarr Configuration Script (PowerShell)
 # =============================================================================
 # This script connects all your *arr services together using their APIs.
@@ -13,6 +13,10 @@
 # 6. Configures root folders in Radarr/Sonarr
 # =============================================================================
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingWriteHost', '',
+    Justification = 'This interactive configuration script intentionally uses Write-Host for colored console output. Write-Output cannot produce the colored terminal UI required for the user experience.'
+)]
 param(
     [string]$RadarrUrl = "http://localhost:7878",
     [string]$SonarrUrl = "http://localhost:8989",
@@ -28,13 +32,10 @@ $RadarrHost = "radarr"
 $SonarrHost = "sonarr"
 $ProwlarrHost = "prowlarr"
 $QBittorrentHost = if ([string]::IsNullOrWhiteSpace($QBittorrentHost)) { "qbittorrent" } else { $QBittorrentHost }
-$PlexHost = "plex"
-$OverseerrHost = "overseerr"
 
 # Paths inside containers
 $MoviesPath = "/movies"
 $TvPath = "/tv"
-$DownloadsPath = "/downloads"
 
 # qBittorrent credentials
 # Username defaults to admin, password retrieved from logs
@@ -57,7 +58,7 @@ function Get-QBittorrentPassword {
         return $password
     }
     
-    Write-Warning "Could not retrieve qBittorrent password from logs"
+    Write-WarningMessage "Could not retrieve qBittorrent password from logs"
     Write-Info "You can check manually: docker logs qbittorrent 2>&1 | Select-String password"
     return $null
 }
@@ -83,13 +84,13 @@ function Write-Success {
     Write-Host $Message
 }
 
-function Write-Warning {
+function Write-WarningMessage {
     param([string]$Message)
     Write-Host "[!] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
 }
 
-function Write-Error {
+function Write-ErrorMessage {
     param([string]$Message)
     Write-Host "[✗] " -ForegroundColor Red -NoNewline
     Write-Host $Message
@@ -120,7 +121,7 @@ function Wait-ForService {
     }
     
     Write-Host ""
-    Write-Error "$Name is not responding after $MaxAttempts attempts"
+    Write-ErrorMessage "$Name is not responding after $MaxAttempts attempts"
     return $false
 }
 
@@ -137,7 +138,7 @@ function Get-ArrApiKey {
         }
     }
     
-    Write-Error "Could not get API key for $Name from $ConfigPath"
+    Write-ErrorMessage "Could not get API key for $Name from $ConfigPath"
     return $null
 }
 
@@ -179,7 +180,7 @@ function Add-QBittorrentToRadarr {
     } | ConvertTo-Json -Depth 10
     
     try {
-        $response = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/downloadclient" `
+        $null = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/downloadclient" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ApiKey } `
             -ContentType "application/json" `
@@ -190,7 +191,7 @@ function Add-QBittorrentToRadarr {
         return $true
     }
     catch {
-        Write-Warning "qBittorrent may already exist in Radarr or failed to add: $($_.Exception.Message)"
+        Write-WarningMessage "qBittorrent may already exist in Radarr or failed to add: $($_.Exception.Message)"
         return $false
     }
 }
@@ -229,7 +230,7 @@ function Add-QBittorrentToSonarr {
     } | ConvertTo-Json -Depth 10
     
     try {
-        $response = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/downloadclient" `
+        $null = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/downloadclient" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ApiKey } `
             -ContentType "application/json" `
@@ -240,7 +241,7 @@ function Add-QBittorrentToSonarr {
         return $true
     }
     catch {
-        Write-Warning "qBittorrent may already exist in Sonarr or failed to add: $($_.Exception.Message)"
+        Write-WarningMessage "qBittorrent may already exist in Sonarr or failed to add: $($_.Exception.Message)"
         return $false
     }
 }
@@ -269,7 +270,7 @@ function Add-RadarrToProwlarr {
     } | ConvertTo-Json -Depth 10
     
     try {
-        $response = Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/applications" `
+        $null = Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/applications" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ProwlarrKey } `
             -ContentType "application/json" `
@@ -280,7 +281,7 @@ function Add-RadarrToProwlarr {
         return $true
     }
     catch {
-        Write-Warning "Radarr may already exist in Prowlarr or failed to add: $($_.Exception.Message)"
+        Write-WarningMessage "Radarr may already exist in Prowlarr or failed to add: $($_.Exception.Message)"
         return $false
     }
 }
@@ -309,7 +310,7 @@ function Add-SonarrToProwlarr {
     } | ConvertTo-Json -Depth 10
     
     try {
-        $response = Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/applications" `
+        $null = Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/applications" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ProwlarrKey } `
             -ContentType "application/json" `
@@ -320,7 +321,7 @@ function Add-SonarrToProwlarr {
         return $true
     }
     catch {
-        Write-Warning "Sonarr may already exist in Prowlarr or failed to add: $($_.Exception.Message)"
+        Write-WarningMessage "Sonarr may already exist in Prowlarr or failed to add: $($_.Exception.Message)"
         return $false
     }
 }
@@ -333,7 +334,7 @@ function Add-RadarrRootFolder {
     $body = @{ path = $MoviesPath } | ConvertTo-Json
     
     try {
-        $response = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/rootfolder" `
+        $null = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/rootfolder" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ApiKey } `
             -ContentType "application/json" `
@@ -344,7 +345,7 @@ function Add-RadarrRootFolder {
         return $true
     }
     catch {
-        Write-Warning "Root folder may already exist in Radarr"
+        Write-WarningMessage "Root folder may already exist in Radarr"
         return $false
     }
 }
@@ -357,7 +358,7 @@ function Add-SonarrRootFolder {
     $body = @{ path = $TvPath } | ConvertTo-Json
     
     try {
-        $response = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/rootfolder" `
+        $null = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/rootfolder" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ApiKey } `
             -ContentType "application/json" `
@@ -368,12 +369,12 @@ function Add-SonarrRootFolder {
         return $true
     }
     catch {
-        Write-Warning "Root folder may already exist in Sonarr"
+        Write-WarningMessage "Root folder may already exist in Sonarr"
         return $false
     }
 }
 
-function Add-PublicIndexer {
+function Add-ProwlarrIndexer {
     param(
         [string]$ApiKey,
         [string]$Name,
@@ -399,7 +400,7 @@ function Add-PublicIndexer {
     } | ConvertTo-Json -Depth 10
     
     try {
-        $response = Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/indexer" `
+        $null = Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/indexer" `
             -Method Post `
             -Headers @{ "X-Api-Key" = $ApiKey } `
             -ContentType "application/json" `
@@ -410,12 +411,12 @@ function Add-PublicIndexer {
         return $true
     }
     catch {
-        Write-Warning "$Name may already exist"
+        Write-WarningMessage "$Name may already exist"
         return $false
     }
 }
 
-function Add-PublicIndexers {
+function Add-ProwlarrPublicIndexer {
     param([string]$ApiKey)
     
     Write-Info "Adding public indexers to Prowlarr..."
@@ -432,11 +433,11 @@ function Add-PublicIndexers {
     )
     
     foreach ($indexer in $indexers) {
-        Add-PublicIndexer -ApiKey $ApiKey -Name $indexer.Name -BaseUrl $indexer.Url -DefinitionName $indexer.Definition
+        Add-ProwlarrIndexer -ApiKey $ApiKey -Name $indexer.Name -BaseUrl $indexer.Url -DefinitionName $indexer.Definition
     }
 }
 
-function Sync-ProwlarrIndexers {
+function Sync-ProwlarrIndexer {
     param([string]$ApiKey)
     
     Write-Info "Triggering Prowlarr indexer sync..."
@@ -454,7 +455,7 @@ function Sync-ProwlarrIndexers {
         Write-Success "Indexer sync triggered"
     }
     catch {
-        Write-Warning "Could not trigger sync"
+        Write-WarningMessage "Could not trigger sync"
     }
 }
 
@@ -465,7 +466,7 @@ function Get-OverseerrApiKey {
     $settingsPath = Join-Path $env:DOCKER_CONFIG "overseerr\settings.json"
     
     if (-not (Test-Path $settingsPath)) {
-        Write-Warning "Overseerr settings.json not found. User must sign in with Plex first."
+        Write-WarningMessage "Overseerr settings.json not found. User must sign in with Plex first."
         return $null
     }
     
@@ -474,7 +475,7 @@ function Get-OverseerrApiKey {
         $apiKey = $settings.main.apiKey
         
         if ([string]::IsNullOrWhiteSpace($apiKey)) {
-            Write-Warning "Overseerr API key not found in settings"
+            Write-WarningMessage "Overseerr API key not found in settings"
             return $null
         }
         
@@ -482,7 +483,7 @@ function Get-OverseerrApiKey {
         return $apiKey
     }
     catch {
-        Write-Warning "Could not read Overseerr settings: $($_.Exception.Message)"
+        Write-WarningMessage "Could not read Overseerr settings: $($_.Exception.Message)"
         return $null
     }
 }
@@ -498,7 +499,7 @@ function Initialize-Overseerr {
         }
     }
     catch {
-        Write-Warning "Could not check Overseerr status"
+        Write-WarningMessage "Could not check Overseerr status"
     }
     
     return $false
@@ -518,7 +519,7 @@ function Add-RadarrToOverseerr {
         $rootFolders = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
         
         if ($radarrProfiles.Count -eq 0 -or $rootFolders.Count -eq 0) {
-            Write-Warning "Radarr not fully configured (missing profiles or root folders)"
+            Write-WarningMessage "Radarr not fully configured (missing profiles or root folders)"
             return $false
         }
         
@@ -548,7 +549,7 @@ function Add-RadarrToOverseerr {
         return $true
     }
     catch {
-        Write-Warning "Could not add Radarr to Overseerr: $($_.Exception.Message)"
+        Write-WarningMessage "Could not add Radarr to Overseerr: $($_.Exception.Message)"
         return $false
     }
 }
@@ -567,7 +568,7 @@ function Add-SonarrToOverseerr {
         $rootFolders = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
         
         if ($sonarrProfiles.Count -eq 0 -or $rootFolders.Count -eq 0) {
-            Write-Warning "Sonarr not fully configured (missing profiles or root folders)"
+            Write-WarningMessage "Sonarr not fully configured (missing profiles or root folders)"
             return $false
         }
         
@@ -597,7 +598,7 @@ function Add-SonarrToOverseerr {
         return $true
     }
     catch {
-        Write-Warning "Could not add Sonarr to Overseerr: $($_.Exception.Message)"
+        Write-WarningMessage "Could not add Sonarr to Overseerr: $($_.Exception.Message)"
         return $false
     }
 }
@@ -626,7 +627,7 @@ function Enable-OverseerrWatchlistSync {
         return $true
     }
     catch {
-        Write-Warning "Could not enable watchlist sync: $($_.Exception.Message)"
+        Write-WarningMessage "Could not enable watchlist sync: $($_.Exception.Message)"
         return $false
     }
 }
@@ -670,7 +671,7 @@ else {
     Wait-ForService -Name "qBittorrent" -Url $QBittorrentUrl -Endpoint "/"
     
     Write-Host ""
-    Write-Warning "Services are running but API keys need to be provided."
+    Write-WarningMessage "Services are running but API keys need to be provided."
     Write-Host ""
     $RadarrApiKey = Read-Host "Enter Radarr API key (from Settings > General)"
     $SonarrApiKey = Read-Host "Enter Sonarr API key (from Settings > General)"
@@ -682,7 +683,7 @@ Write-Header "Configuring Download Clients"
 # Get qBittorrent password from logs if not provided
 $QbPassword = Get-QBittorrentPassword -ContainerName "qbittorrent"
 if (-not $QbPassword) {
-    Write-Warning "Could not retrieve qBittorrent password automatically."
+    Write-WarningMessage "Could not retrieve qBittorrent password automatically."
     Write-Info "Please check: docker logs qbittorrent 2>&1 | Select-String password"
     $QbPassword = Read-Host "Enter qBittorrent WebUI password"
 }
@@ -699,26 +700,26 @@ Add-RadarrToProwlarr -ProwlarrKey $ProwlarrApiKey -RadarrKey $RadarrApiKey
 Add-SonarrToProwlarr -ProwlarrKey $ProwlarrApiKey -SonarrKey $SonarrApiKey
 
 Write-Header "Adding Public Indexers"
-Add-PublicIndexers -ApiKey $ProwlarrApiKey
+Add-ProwlarrPublicIndexer -ApiKey $ProwlarrApiKey
 
 Write-Info "Waiting 5 seconds for indexers to be added..."
 Start-Sleep -Seconds 5
 
-Sync-ProwlarrIndexers -ApiKey $ProwlarrApiKey
+Sync-ProwlarrIndexer -ApiKey $ProwlarrApiKey
 
 Write-Header "Configuring Overseerr"
 
 Wait-ForService -Name "Overseerr" -Url $OverseerrUrl -Endpoint "/api/v1/status"
 
 if (-not (Initialize-Overseerr)) {
-    Write-Warning "Overseerr is not initialized. Please sign in with your Plex account at $OverseerrUrl"
+    Write-WarningMessage "Overseerr is not initialized. Please sign in with your Plex account at $OverseerrUrl"
     Write-Info "Complete the Overseerr sign-in, then press Enter to continue."
     Write-Info "Or type 'skip' to skip Overseerr configuration for now."
     $overseerrChoice = Read-Host "Continue"
     if ($overseerrChoice -match '^(skip|s)$') {
-        Write-Warning "Skipping Overseerr configuration"
+        Write-WarningMessage "Skipping Overseerr configuration"
     } elseif (-not (Initialize-Overseerr)) {
-        Write-Warning "Overseerr still not initialized. Skipping Overseerr configuration"
+        Write-WarningMessage "Overseerr still not initialized. Skipping Overseerr configuration"
     }
 }
 
@@ -728,7 +729,7 @@ if (Initialize-Overseerr) {
     $overseerrApiKey = Get-OverseerrApiKey
     
     if ($null -eq $overseerrApiKey) {
-        Write-Warning "Could not retrieve Overseerr API key - skipping Overseerr configuration"
+        Write-WarningMessage "Could not retrieve Overseerr API key - skipping Overseerr configuration"
     } else {
         Add-RadarrToOverseerr -RadarrApiKey $RadarrApiKey -OverseerrApiKey $overseerrApiKey
         Add-SonarrToOverseerr -SonarrApiKey $SonarrApiKey -OverseerrApiKey $overseerrApiKey
