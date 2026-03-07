@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# Simplarr Test Suite — Phases 1–7 (Bash)
+# Simplarr Test Suite — Phases 1–9 (Bash)
 # =============================================================================
 # Self-contained test runner covering preflight, file existence, syntax
 # validation, nginx config content checks, qBittorrent template validation,
-# setup script validation, and configure script validation. Mirrors
-# dev-testing/test.ps1 phases 1–7.
+# setup script validation, configure script validation, container startup,
+# and live service API integration. Mirrors dev-testing/test.ps1 phases 1–7.
 #
 # Usage:
 #   ./dev-testing/test.sh
@@ -18,14 +18,20 @@
 #   - bash >= 4.0
 #   - docker (optional; phases that need it are skipped when unavailable)
 #
+# Environment Variables (Phases 8–9):
+#   SIMPLARR_TEST_TIMEOUT   — seconds to wait for container health (default: 120)
+#   SIMPLARR_TEST_BASE_PORT — override random base port for test services
+#
 # Phases:
-#   1  Preflight  — Docker and docker compose availability
+#   1  Preflight     — Docker and docker compose availability
 #   2  File       — Required project files exist
 #   3  Syntax     — bash -n, docker compose config --quiet, nginx -t
 #   4  Nginx      — Upstream proxy_pass targets and location routes
 #   5  qBittorrent — Template/config validation (static analysis only)
 #   6  Setup      — setup.sh env vars, modes, qBittorrent template deploy
-#   7  Configure  — configure.sh/configure.ps1 API function presence
+#   7  Configure     — configure.sh/configure.ps1 API function presence
+#   8  Container     — Spin up isolated stack; verify all health checks pass
+#   9  Connectivity  — Health endpoints, config.xml creation, get_arr_api_key
 # =============================================================================
 
 set -uo pipefail
@@ -52,6 +58,21 @@ SKIP_COUNT=0
 # Temp directory for nginx wrapper configs — cleaned up on exit
 _TMPDIR=""
 
+# Docker integration test state — set by Phase 8, consumed by cleanup and Phase 9
+_COMPOSE_PROJECT_NAME=""
+_TEST_CONFIG_DIR=""
+_PHASE8_SUCCESS=false
+_TEST_BASE_PORT=0
+
+# Per-service host ports — assigned by Phase 8 from a random base; zero until set
+PORT_RADARR=0
+PORT_SONARR=0
+PORT_PROWLARR=0
+PORT_OVERSEERR=0
+PORT_QBITTORRENT=0
+PORT_QBIT_TORRENT=0
+PORT_TAUTULLI=0
+
 # ---------------------------------------------------------------------------
 # Cleanup
 # ---------------------------------------------------------------------------
@@ -60,6 +81,27 @@ _TMPDIR=""
 cleanup() {
     if [[ -n "${_TMPDIR}" && -d "${_TMPDIR}" ]]; then
         rm -rf "${_TMPDIR}"
+    fi
+
+    # Tear down any Docker containers and volumes started by Phase 8.
+    # Runs unconditionally on EXIT (success or failure) to prevent dangling
+    # containers from polluting the host. The COMPOSE_PROJECT_NAME ensures we
+    # only touch the test-run-specific stack, never a production deployment.
+    if [[ -n "${_COMPOSE_PROJECT_NAME}" && "${COMPOSE_AVAILABLE}" == "true" ]]; then
+        printf "\n  [cleanup] Removing test containers (project: %s)...\n" \
+            "${_COMPOSE_PROJECT_NAME}"
+        COMPOSE_PROJECT_NAME="${_COMPOSE_PROJECT_NAME}" \
+            "${COMPOSE_CMD[@]}" \
+            -f "${_TEST_CONFIG_DIR}/compose-override.yml" \
+            down --volumes --remove-orphans >/dev/null 2>&1 || true
+        printf "  [cleanup] Docker teardown complete.\n"
+    fi
+
+    if [[ -n "${_TEST_CONFIG_DIR}" && -d "${_TEST_CONFIG_DIR}" ]]; then
+        # Container processes may create files owned by a different UID; chmod
+        # before removal ensures we can delete them without needing sudo.
+        chmod -R a+rwX "${_TEST_CONFIG_DIR}" 2>/dev/null || true
+        rm -rf "${_TEST_CONFIG_DIR}" 2>/dev/null || true
     fi
 }
 trap cleanup EXIT
@@ -98,7 +140,7 @@ section() {
 
 printf "\n%b" "${BOLD}${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
-printf "  Simplarr Test Suite — Phases 1–7\n"
+printf "  Simplarr Test Suite — Phases 1–9\n"
 printf "════════════════════════════════════════════════════════════\n"
 printf "%b\n" "${NC}"
 
@@ -643,6 +685,317 @@ if [[ -f "${CONFIGURE_SH}" ]]; then
     fi
 else
     fail "configure.sh is missing"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 8: Container Startup
+# ---------------------------------------------------------------------------
+
+section "Phase 8: Container Startup"
+
+if [[ "${COMPOSE_AVAILABLE}" != "true" ]]; then
+    skip "Phase 8 — docker compose not available; skipping container integration tests"
+    skip "Phase 9 — skipped (docker compose not available)"
+else
+    _TIMEOUT="${SIMPLARR_TEST_TIMEOUT:-120}"
+    _COMPOSE_PROJECT_NAME="simplarr-test-$$"
+    _TEST_CONFIG_DIR="$(mktemp -d -t "simplarr-test-XXXXXX")"
+
+    printf "\n"
+    info "Project name : ${_COMPOSE_PROJECT_NAME}"
+    info "Config dir   : ${_TEST_CONFIG_DIR}"
+    info "Timeout      : ${_TIMEOUT}s"
+
+    # Pick a random base port to avoid conflicts with production services.
+    # Uses SIMPLARR_TEST_BASE_PORT env var if set; otherwise picks a random
+    # value in 20000–29999, safely above well-known and production ports.
+    if [[ -n "${SIMPLARR_TEST_BASE_PORT:-}" ]]; then
+        _TEST_BASE_PORT="${SIMPLARR_TEST_BASE_PORT}"
+    else
+        # RANDOM is 0–32767; shift into 20000–29999 range
+        _TEST_BASE_PORT=$(( (RANDOM % 10000) + 20000 ))
+    fi
+
+    PORT_RADARR=$(( _TEST_BASE_PORT + 0 ))
+    PORT_SONARR=$(( _TEST_BASE_PORT + 1 ))
+    PORT_PROWLARR=$(( _TEST_BASE_PORT + 2 ))
+    PORT_OVERSEERR=$(( _TEST_BASE_PORT + 3 ))
+    PORT_QBITTORRENT=$(( _TEST_BASE_PORT + 4 ))
+    PORT_QBIT_TORRENT=$(( _TEST_BASE_PORT + 5 ))
+    PORT_TAUTULLI=$(( _TEST_BASE_PORT + 6 ))
+
+    info "Base port    : ${_TEST_BASE_PORT} (range: ${_TEST_BASE_PORT}–$(( _TEST_BASE_PORT + 6 )))"
+    printf "\n"
+    info "Port map: radarr=${PORT_RADARR} sonarr=${PORT_SONARR} prowlarr=${PORT_PROWLARR}"
+    info "          overseerr=${PORT_OVERSEERR} qbittorrent=${PORT_QBITTORRENT} tautulli=${PORT_TAUTULLI}"
+
+    # Create per-service config directories on the host filesystem
+    for _svc8 in radarr sonarr prowlarr overseerr qbittorrent tautulli; do
+        mkdir -p "${_TEST_CONFIG_DIR}/${_svc8}"
+    done
+
+    pass "Created test config directories under ${_TEST_CONFIG_DIR}"
+
+    # Write a self-contained test compose file with remapped ports and isolated
+    # volumes. Uses the same image tags as production for parity. Shorter
+    # healthcheck intervals (10s vs 30s) speed up the test.
+    cat > "${_TEST_CONFIG_DIR}/compose-override.yml" << COMPOSE_EOF
+services:
+  radarr:
+    image: linuxserver/radarr:6.0.4.10291-ls294
+    ports:
+      - "${PORT_RADARR}:7878"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/radarr:/config
+    healthcheck:
+      test: curl -f http://localhost:7878/ping || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  sonarr:
+    image: linuxserver/sonarr:4.0.16.2944-ls303
+    ports:
+      - "${PORT_SONARR}:8989"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/sonarr:/config
+    healthcheck:
+      test: curl -f http://localhost:8989/ping || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  prowlarr:
+    image: linuxserver/prowlarr:2.3.0.5236-ls138
+    ports:
+      - "${PORT_PROWLARR}:9696"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/prowlarr:/config
+    healthcheck:
+      test: curl -f http://localhost:9696/ping || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  overseerr:
+    image: sctx/overseerr:1.35.0
+    ports:
+      - "${PORT_OVERSEERR}:5055"
+    environment:
+      - TZ=UTC
+      - LOG_LEVEL=info
+    volumes:
+      - ${_TEST_CONFIG_DIR}/overseerr:/app/config
+    healthcheck:
+      test: wget -q --spider http://localhost:5055/api/v1/status || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+    ports:
+      - "${PORT_QBITTORRENT}:8080"
+      - "${PORT_QBIT_TORRENT}:6881"
+      - "${PORT_QBIT_TORRENT}:6881/udp"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - WEBUI_PORT=8080
+    volumes:
+      - ${_TEST_CONFIG_DIR}/qbittorrent:/config
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  tautulli:
+    image: linuxserver/tautulli:v2.16.1-ls217
+    ports:
+      - "${PORT_TAUTULLI}:8181"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/tautulli:/config
+    healthcheck:
+      test: curl -f http://localhost:8181/status || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+COMPOSE_EOF
+
+    pass "Generated self-contained test compose file (${_TEST_CONFIG_DIR}/compose-override.yml)"
+
+    # Start all test containers and block until every healthcheck passes.
+    # The EXIT trap (cleanup) will always run docker compose down --volumes,
+    # ensuring no dangling containers or volumes on success or failure.
+    printf "\n"
+    info "Running: docker compose up -d --wait (timeout: ${_TIMEOUT}s)"
+    info "Note: first run will pull images — this may take several minutes."
+
+    _COMPOSE_UP_EXIT=0
+    _COMPOSE_UP_OUTPUT=""
+    if _COMPOSE_UP_OUTPUT=$(
+        COMPOSE_PROJECT_NAME="${_COMPOSE_PROJECT_NAME}" \
+        timeout "${_TIMEOUT}" \
+        "${COMPOSE_CMD[@]}" \
+        -f "${_TEST_CONFIG_DIR}/compose-override.yml" \
+        up -d --wait 2>&1
+    ); then
+        pass "docker compose up --wait — all services reached healthy state"
+    else
+        _COMPOSE_UP_EXIT=$?
+        if [[ "${_COMPOSE_UP_EXIT}" -eq 124 ]]; then
+            fail "docker compose up --wait — timed out after ${_TIMEOUT}s"
+        else
+            fail "docker compose up --wait — failed (exit ${_COMPOSE_UP_EXIT})"
+        fi
+        info "Compose output: ${_COMPOSE_UP_OUTPUT}"
+    fi
+
+    # Double-check each container's health via docker inspect
+    printf "\n"
+    info "Verifying container health states via docker inspect..."
+
+    declare -a _PHASE8_SVCS=(radarr sonarr prowlarr overseerr qbittorrent tautulli)
+    _ALL_HEALTHY=true
+
+    for _svc8 in "${_PHASE8_SVCS[@]}"; do
+        _cid=$(
+            COMPOSE_PROJECT_NAME="${_COMPOSE_PROJECT_NAME}" \
+            "${COMPOSE_CMD[@]}" \
+            -f "${_TEST_CONFIG_DIR}/compose-override.yml" \
+            ps -q "${_svc8}" 2>/dev/null || true
+        )
+        if [[ -z "${_cid}" ]]; then
+            fail "Phase 8 — ${_svc8}: container not found in project ${_COMPOSE_PROJECT_NAME}"
+            _ALL_HEALTHY=false
+            continue
+        fi
+        _health=$(docker inspect --format='{{.State.Health.Status}}' "${_cid}" 2>/dev/null \
+            || echo "unknown")
+        if [[ "${_health}" == "healthy" ]]; then
+            pass "Phase 8 — ${_svc8}: healthy"
+        else
+            fail "Phase 8 — ${_svc8}: not healthy (status: ${_health})"
+            _ALL_HEALTHY=false
+        fi
+    done
+
+    if [[ "${_ALL_HEALTHY}" == "true" ]]; then
+        _PHASE8_SUCCESS=true
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 9: Service Connectivity
+# ---------------------------------------------------------------------------
+
+section "Phase 9: Service Connectivity"
+
+if [[ "${_PHASE8_SUCCESS}" != "true" ]]; then
+    skip "Phase 9 — skipped (Phase 8 did not complete successfully)"
+else
+    # -- 9a: Health endpoint connectivity -----------------------------------
+
+    printf "\n"
+    info "Hitting service health endpoints on remapped test ports..."
+
+    declare -a _CONN_SVCS=(
+        "radarr"
+        "sonarr"
+        "prowlarr"
+        "overseerr"
+        "qbittorrent"
+        "tautulli"
+    )
+    declare -a _CONN_URLS=(
+        "http://localhost:${PORT_RADARR}/ping"
+        "http://localhost:${PORT_SONARR}/ping"
+        "http://localhost:${PORT_PROWLARR}/ping"
+        "http://localhost:${PORT_OVERSEERR}/api/v1/status"
+        "http://localhost:${PORT_QBITTORRENT}/"
+        "http://localhost:${PORT_TAUTULLI}/status"
+    )
+
+    for _i in "${!_CONN_SVCS[@]}"; do
+        _svc9="${_CONN_SVCS[${_i}]}"
+        _url="${_CONN_URLS[${_i}]}"
+        _http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${_url}" \
+            2>/dev/null || echo "000")
+        # 200 OK, 302 redirect, 401 unauthorised, 403 forbidden all confirm service is alive
+        if [[ "${_http_code}" =~ ^(200|302|401|403)$ ]]; then
+            pass "Phase 9 — ${_svc9} endpoint reachable (HTTP ${_http_code}): ${_url}"
+        else
+            fail "Phase 9 — ${_svc9} endpoint unreachable (HTTP ${_http_code}): ${_url}"
+        fi
+    done
+
+    # -- 9b: config.xml creation --------------------------------------------
+
+    printf "\n"
+    info "Polling for *arr config.xml files (written by services on first start)..."
+
+    declare -a _ARR_SVCS=(radarr sonarr prowlarr)
+
+    for _svc9 in "${_ARR_SVCS[@]}"; do
+        _cfg="${_TEST_CONFIG_DIR}/${_svc9}/config.xml"
+        _wait_start="${SECONDS}"
+        while [[ ! -f "${_cfg}" ]]; do
+            _elapsed=$(( SECONDS - _wait_start ))
+            if [[ "${_elapsed}" -ge 60 ]]; then
+                break
+            fi
+            sleep 2
+        done
+        if [[ -f "${_cfg}" ]]; then
+            pass "Phase 9 — ${_svc9}/config.xml created by service"
+        else
+            fail "Phase 9 — ${_svc9}/config.xml not found after 60s (service may not have initialised)"
+        fi
+    done
+
+    # -- 9c: get_arr_api_key extraction -------------------------------------
+
+    printf "\n"
+    info "Verifying get_arr_api_key extraction (same grep pattern as configure.sh)..."
+
+    for _svc9 in "${_ARR_SVCS[@]}"; do
+        _cfg="${_TEST_CONFIG_DIR}/${_svc9}/config.xml"
+        if [[ ! -f "${_cfg}" ]]; then
+            skip "get_arr_api_key — ${_svc9}: config.xml absent, skipping"
+            continue
+        fi
+        # Mirror configure.sh's get_arr_api_key(): grep -oP '(?<=<ApiKey>)[^<]+' config.xml
+        _api_key=$(grep -oP '(?<=<ApiKey>)[^<]+' "${_cfg}" 2>/dev/null || true)
+        if [[ -n "${_api_key}" && "${#_api_key}" -ge 16 ]]; then
+            pass "get_arr_api_key — ${_svc9}: key extracted (${_api_key:0:8}...)"
+        else
+            fail "get_arr_api_key — ${_svc9}: no valid API key found in config.xml"
+        fi
+    done
 fi
 
 # ---------------------------------------------------------------------------
