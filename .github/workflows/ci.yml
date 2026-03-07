@@ -185,9 +185,42 @@ jobs:
     needs: fast-gate
 
     steps:
-      - name: Placeholder — full container tests (stub)
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Bash test suite
+        shell: bash
         run: |
-          # TODO: Full container tests will be wired in a later work item.
-          # This placeholder step ensures full-suite job structure is valid
-          # and depends on fast-gate completing successfully.
-          echo "Full container tests: stub placeholder — to be implemented in a later item."
+          mkdir -p /tmp/test-logs
+          bash dev-testing/test.sh 2>&1 | tee /tmp/test-logs/bash-suite.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-bash
+          path: /tmp/test-logs/
+
+  powershell-suite:
+    name: PowerShell Suite (target < 30 min)
+    runs-on: ubuntu-latest
+    needs: fast-gate
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell test suite
+        shell: pwsh
+        run: |
+          $null = New-Item -ItemType Directory -Force -Path '/tmp/test-logs'
+          ./dev-testing/test.ps1 2>&1 | Tee-Object -FilePath '/tmp/test-logs/powershell-suite.log'
+          exit $LASTEXITCODE
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-powershell
+          path: /tmp/test-logs/
