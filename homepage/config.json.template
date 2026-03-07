@@ -1,0 +1,9 @@
+{
+  "plex": ${PLEX_PORT},
+  "overseerr": ${OVERSEERR_PORT},
+  "radarr": ${RADARR_PORT},
+  "sonarr": ${SONARR_PORT},
+  "prowlarr": ${PROWLARR_PORT},
+  "qbittorrent": ${QBITTORRENT_PORT},
+  "tautulli": ${TAUTULLI_PORT}
+}
