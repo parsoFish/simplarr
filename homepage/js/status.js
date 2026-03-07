@@ -42,7 +42,7 @@ async function checkService(service) {
     // no-cors means we can't read status, but if we get here without error, service responded
     el.textContent = 'Online';
     el.className = 'status up';
-  } catch (err) {
+  } catch {
     el.textContent = 'Offline';
     el.className = 'status down';
   }

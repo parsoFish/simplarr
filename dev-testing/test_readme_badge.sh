@@ -204,7 +204,7 @@ else
 fi
 
 # The section must mention CI requirement before merging
-if readme_contains -i "CI.*pass|pass.*CI|CI.*must|must.*CI|CI.*before.*merge|merge.*CI|CI.*required"; then
+if readme_contains "[Cc][Ii].*[Pp]ass|[Pp]ass.*[Cc][Ii]|[Cc][Ii].*must|must.*[Cc][Ii]|[Cc][Ii].*before.*merge|merge.*[Cc][Ii]|[Cc][Ii].*required"; then
     pass "Development section mentions CI must pass before merging"
 else
     fail "Development section must state that CI must pass before merging (e.g., 'CI must pass before merging')"
