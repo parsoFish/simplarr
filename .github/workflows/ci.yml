@@ -36,12 +36,14 @@ jobs:
             shellcheck --severity=style "${sh_files[@]}"
           fi
 
-      - name: Run PSScriptAnalyzer against all .ps1 files
+      - name: Run PSScriptAnalyzer against production .ps1 files
         shell: pwsh
         run: |
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          # Exclude dev-testing/ — test harness scripts use Write-Host for colored output
+          # and are validated separately by Test-PSScriptAnalyzer.Tests.ps1
           $ps1Files = Get-ChildItem -Recurse -Filter "*.ps1" |
-            Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' }
+            Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' -and $_.FullName -notmatch '[/\\]dev-testing[/\\]' }
           $findings = $ps1Files | ForEach-Object {
             Invoke-ScriptAnalyzer -Path $_.FullName -Severity @('Warning', 'Error')
           }
