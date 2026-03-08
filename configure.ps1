@@ -488,23 +488,6 @@ function Get-OverseerrApiKey {
     }
 }
 
-function Initialize-Overseerr {
-    Write-Info "Checking Overseerr initialization status..."
-    
-    try {
-        $status = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/status" -Method Get -ErrorAction Stop
-        if ($status.initialized) {
-            Write-Success "Overseerr already initialized"
-            return $true
-        }
-    }
-    catch {
-        Write-WarningMessage "Could not check Overseerr status"
-    }
-    
-    return $false
-}
-
 function Add-RadarrToOverseerr {
     param(
         [string]$RadarrApiKey,
@@ -711,32 +694,17 @@ Write-Header "Configuring Overseerr"
 
 Wait-ForService -Name "Overseerr" -Url $OverseerrUrl -Endpoint "/api/v1/status"
 
-if (-not (Initialize-Overseerr)) {
-    Write-WarningMessage "Overseerr is not initialized. Please sign in with your Plex account at $OverseerrUrl"
-    Write-Info "Complete the Overseerr sign-in, then press Enter to continue."
-    Write-Info "Or type 'skip' to skip Overseerr configuration for now."
-    $overseerrChoice = Read-Host "Continue"
-    if ($overseerrChoice -match '^(skip|s)$') {
-        Write-WarningMessage "Skipping Overseerr configuration"
-    } elseif (-not (Initialize-Overseerr)) {
-        Write-WarningMessage "Overseerr still not initialized. Skipping Overseerr configuration"
-    }
-}
+$overseerrApiKey = Get-OverseerrApiKey
 
-if (Initialize-Overseerr) {
+if ($null -eq $overseerrApiKey) {
+    Write-WarningMessage "Overseerr is not initialized. Sign in with your Plex account at $OverseerrUrl"
+    Write-Info "After signing in, re-run this script to complete Overseerr configuration."
+} else {
     Write-Info "Overseerr is initialized, configuring services..."
-    
-    $overseerrApiKey = Get-OverseerrApiKey
-    
-    if ($null -eq $overseerrApiKey) {
-        Write-WarningMessage "Could not retrieve Overseerr API key - skipping Overseerr configuration"
-    } else {
-        Add-RadarrToOverseerr -RadarrApiKey $RadarrApiKey -OverseerrApiKey $overseerrApiKey
-        Add-SonarrToOverseerr -SonarrApiKey $SonarrApiKey -OverseerrApiKey $overseerrApiKey
-        Enable-OverseerrWatchlistSync -OverseerrApiKey $overseerrApiKey
-        
-        Write-Success "Overseerr configuration complete!"
-    }
+    Add-RadarrToOverseerr -RadarrApiKey $RadarrApiKey -OverseerrApiKey $overseerrApiKey
+    Add-SonarrToOverseerr -SonarrApiKey $SonarrApiKey -OverseerrApiKey $overseerrApiKey
+    Enable-OverseerrWatchlistSync -OverseerrApiKey $overseerrApiKey
+    Write-Success "Overseerr configuration complete!"
 }
 
 Write-Host ""
