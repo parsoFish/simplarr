@@ -1,0 +1,226 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "**"
+  pull_request:
+
+# Required environment variables for docker compose variable interpolation
+env:
+  PUID: "1000"
+  PGID: "1000"
+  TZ: "UTC"
+  DOCKER_CONFIG: "/tmp/docker-config"
+  DOCKER_MEDIA: "/tmp/docker-media"
+
+jobs:
+  lint:
+    name: Lint (ShellCheck + PSScriptAnalyzer)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck against all .sh files
+        run: |
+          mapfile -t sh_files < <(find . -name "*.sh" -not -path "./.git/*" | sort)
+          if [ "${#sh_files[@]}" -eq 0 ]; then
+            echo "No .sh files found."
+          else
+            shellcheck --severity=style "${sh_files[@]}"
+          fi
+
+      - name: Run PSScriptAnalyzer against all .ps1 files
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $ps1Files = Get-ChildItem -Recurse -Filter "*.ps1" |
+            Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' }
+          $findings = $ps1Files | ForEach-Object {
+            Invoke-ScriptAnalyzer -Path $_.FullName -Severity @('Warning', 'Error')
+          }
+          if ($findings) {
+            $findings | Format-List
+            Write-Error "PSScriptAnalyzer found $($findings.Count) Warning/Error finding(s). Failing lint."
+            exit 1
+          }
+          Write-Host "PSScriptAnalyzer: no Warning or Error findings."
+
+  eslint-homepage:
+    name: ESLint (Homepage JavaScript)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install ESLint dependencies
+        run: npm install --prefix homepage
+
+      - name: Run ESLint on homepage JavaScript
+        run: node homepage/node_modules/.bin/eslint homepage/js/
+
+  fast-gate:
+    name: Fast Gate (target < 15 min)
+    runs-on: ubuntu-latest
+    needs: [lint, eslint-homepage]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate docker-compose-unified.yml
+        env:
+          COMPOSE_FILE: docker-compose-unified.yml
+        run: docker compose config --quiet
+
+      - name: Validate docker-compose-nas.yml
+        env:
+          COMPOSE_FILE: docker-compose-nas.yml
+        run: docker compose config --quiet
+
+      - name: Validate docker-compose-pi.yml
+        env:
+          COMPOSE_FILE: docker-compose-pi.yml
+        run: docker compose config --quiet
+
+      - name: Check required file existence
+        run: |
+          required_files=(
+            "setup.sh"
+            "preflight.sh"
+            "configure.sh"
+            "setup.ps1"
+            "preflight.ps1"
+            "configure.ps1"
+          )
+          required_dirs=(
+            "homepage"
+            "nginx"
+            "templates"
+          )
+
+          failed=0
+
+          for f in "${required_files[@]}"; do
+            if test -f "$f"; then
+              echo "  [OK] $f"
+            else
+              echo "  [MISSING] $f" >&2
+              failed=1
+            fi
+          done
+
+          for d in "${required_dirs[@]}"; do
+            if test -d "$d"; then
+              echo "  [OK] $d/"
+            else
+              echo "  [MISSING] $d/" >&2
+              failed=1
+            fi
+          done
+
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more required files/directories are missing." >&2
+            exit 1
+          fi
+
+      - name: Bash shell script syntax check
+        run: |
+          failed=0
+          while IFS= read -r script; do
+            if bash -n "$script" 2>&1; then
+              echo "  [OK] $script"
+            else
+              echo "  [FAIL] $script" >&2
+              failed=1
+            fi
+          done < <(find . -name "*.sh" -not -path "./.git/*" | sort)
+
+          if [ "$failed" -ne 0 ]; then
+            echo "One or more shell scripts have syntax errors." >&2
+            exit 1
+          fi
+
+      - name: PowerShell PSParser syntax validation
+        shell: pwsh
+        run: |
+          $failed = $false
+          $scripts = Get-ChildItem -Recurse -Filter "*.ps1" |
+            Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' }
+
+          foreach ($script in $scripts) {
+            $content = Get-Content -Raw $script.FullName
+            $parseErrors = $null
+            $null = [System.Management.Automation.PSParser]::Tokenize($content, [ref]$parseErrors)
+
+            if ($parseErrors.Count -gt 0) {
+              Write-Error "Syntax errors in $($script.FullName):"
+              $parseErrors | ForEach-Object { Write-Error "  Line $($_.Token.StartLine): $($_.Message)" }
+              $failed = $true
+            } else {
+              Write-Host "  [OK] $($script.FullName)"
+            }
+          }
+
+          if ($failed) {
+            Write-Error "One or more PowerShell scripts have syntax errors."
+            exit 1
+          }
+
+  full-suite:
+    name: Full Suite (target < 30 min)
+    runs-on: ubuntu-latest
+    needs: fast-gate
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run Bash test suite
+        shell: bash
+        run: |
+          mkdir -p /tmp/test-logs
+          bash dev-testing/test.sh 2>&1 | tee /tmp/test-logs/bash-suite.log
+          exit "${PIPESTATUS[0]}"
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-bash
+          path: /tmp/test-logs/
+
+  powershell-suite:
+    name: PowerShell Suite (target < 30 min)
+    runs-on: ubuntu-latest
+    needs: fast-gate
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run PowerShell test suite
+        shell: pwsh
+        run: |
+          $null = New-Item -ItemType Directory -Force -Path '/tmp/test-logs'
+          ./dev-testing/test.ps1 2>&1 | Tee-Object -FilePath '/tmp/test-logs/powershell-suite.log'
+          exit $LASTEXITCODE
+
+      - name: Upload test logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs-powershell
+          path: /tmp/test-logs/

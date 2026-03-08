@@ -141,6 +141,14 @@ services:
     container_name: homepage
     expose:
       - "80"
+    environment:
+      - PLEX_PORT=${PLEX_PORT:-32400}
+      - OVERSEERR_PORT=${OVERSEERR_PORT:-5055}
+      - RADARR_PORT=${RADARR_PORT:-7878}
+      - SONARR_PORT=${SONARR_PORT:-8989}
+      - PROWLARR_PORT=${PROWLARR_PORT:-9696}
+      - QBITTORRENT_PORT=${QBITTORRENT_PORT:-8080}
+      - TAUTULLI_PORT=${TAUTULLI_PORT:-8181}
     healthcheck:
       test: curl -f http://localhost:80 || exit 1
       interval: 30s
