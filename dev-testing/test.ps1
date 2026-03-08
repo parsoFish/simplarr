@@ -94,8 +94,9 @@ function Show-TestHelp {
 }
 
 
-function Write-ServiceUrls {
+function Write-ServiceUrl {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'QbPassword', Justification='Password is retrieved from Docker logs for display only; SecureString is not applicable here')]
     param(
         [string]$TestDir,
         [string]$QbPassword
@@ -1483,7 +1484,7 @@ if ($Cleanup) {
     Remove-Item -Recurse -Force $testDir -ErrorAction SilentlyContinue
     Write-Pass "Test environment cleaned up"
 } else {
-    Write-ServiceUrls -TestDir $testDir -QbPassword $qbPassword
+    Write-ServiceUrl -TestDir $testDir -QbPassword $qbPassword
     Write-Skip "Cleanup (use -Cleanup flag to auto-clean)"
 }
 
