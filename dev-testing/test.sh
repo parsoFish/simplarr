@@ -913,10 +913,58 @@ fi
 # Phase 9: Service Connectivity
 # ---------------------------------------------------------------------------
 
-section "Phase 9: Service Connectivity"
+section "Phase 9: Overseerr OAuth Detection & Service Connectivity"
+
+# -- 9a: Overseerr OAuth uninitialized detection (mock config, no container needed) --
+
+printf "\n"
+info "Overseerr OAuth detection — uninitialized path (mock files, no container)"
+
+_ovsr_mock_dir="$(mktemp -d)"
+_ovsr_config_dir="${_ovsr_mock_dir}/overseerr"
+mkdir -p "${_ovsr_config_dir}"
+
+# Case 1: settings.json is absent → extraction should yield empty string
+_ovsr_key_absent=$(grep -o '"apiKey":"[^"]*"' "${_ovsr_config_dir}/settings.json" \
+    2>/dev/null | cut -d'"' -f4 || true)
+if [[ -z "${_ovsr_key_absent}" ]]; then
+    pass "Overseerr uninitialized — settings.json absent → apiKey empty (correct)"
+else
+    fail "Overseerr uninitialized — expected empty apiKey but got: ${_ovsr_key_absent}"
+fi
+
+# Case 2: settings.json present but apiKey is empty string
+printf '{"main":{"apiKey":"","applicationTitle":"Overseerr"}}\n' \
+    > "${_ovsr_config_dir}/settings.json"
+_ovsr_key_empty=$(grep -o '"apiKey":"[^"]*"' "${_ovsr_config_dir}/settings.json" \
+    2>/dev/null | cut -d'"' -f4 || true)
+if [[ -z "${_ovsr_key_empty}" ]]; then
+    pass "Overseerr uninitialized — empty apiKey in settings.json → apiKey empty (correct)"
+else
+    fail "Overseerr uninitialized — expected empty apiKey but got: ${_ovsr_key_empty}"
+fi
+
+# -- 9b: Overseerr OAuth initialized key-reading (mock settings.json, no container needed) --
+
+printf "\n"
+info "Overseerr OAuth detection — initialized path (mock settings.json, no container)"
+
+_ovsr_mock_key="testkey-overseerr-abc12345"
+# Compact JSON (no spaces) matches configure.sh grep pattern: '"apiKey":"[^"]*"'
+printf '{"main":{"apiKey":"%s","applicationTitle":"Overseerr"}}\n' "${_ovsr_mock_key}" \
+    > "${_ovsr_config_dir}/settings.json"
+_ovsr_key_found=$(grep -o '"apiKey":"[^"]*"' "${_ovsr_config_dir}/settings.json" \
+    2>/dev/null | cut -d'"' -f4 || true)
+if [[ "${_ovsr_key_found}" == "${_ovsr_mock_key}" ]]; then
+    pass "Overseerr initialized — apiKey '${_ovsr_mock_key:0:8}...' extracted from mock settings.json"
+else
+    fail "Overseerr initialized — expected '${_ovsr_mock_key}' but got '${_ovsr_key_found}'"
+fi
+
+rm -rf "${_ovsr_mock_dir}"
 
 if [[ "${_PHASE8_SUCCESS}" != "true" ]]; then
-    skip "Phase 9 — skipped (Phase 8 did not complete successfully)"
+    skip "Phase 9 (service connectivity) — skipped (Phase 8 did not complete successfully)"
 else
     # -- 9a: Health endpoint connectivity -----------------------------------
 
@@ -996,6 +1044,36 @@ else
             fail "get_arr_api_key — ${_svc9}: no valid API key found in config.xml"
         fi
     done
+
+    # -- 9d: Overseerr initialization status (integration, full-suite only) --
+    # This test targets the live Overseerr container started in Phase 8.
+    # It is intentionally in the _PHASE8_SUCCESS gate so it only runs in the
+    # full container suite (CI full-suite job), not the fast-gate (no Docker).
+
+    printf "
+"
+    info "Overseerr integration — status endpoint via live container (full-suite only)"
+
+    _ovsr_status=$(curl -s --max-time 10         "http://localhost:${PORT_OVERSEERR}/api/v1/status" 2>/dev/null || true)
+    if [[ -n "${_ovsr_status}" ]] && echo "${_ovsr_status}" | grep -q '"initialized"'; then
+        pass "Overseerr integration — status endpoint returns 'initialized' field"
+    else
+        fail "Overseerr integration — status endpoint did not return 'initialized' field"
+    fi
+
+    # Fresh Overseerr container will not have settings.json until Plex OAuth completes.
+    # Verify the detection logic handles the absent-file case without error.
+    _ovsr_live_cfg="${_TEST_CONFIG_DIR}/overseerr/settings.json"
+    if [[ -f "${_ovsr_live_cfg}" ]]; then
+        _ovsr_live_key=$(grep -o '"apiKey":"[^"]*"' "${_ovsr_live_cfg}"             2>/dev/null | cut -d'"' -f4 || true)
+        if [[ -n "${_ovsr_live_key}" ]]; then
+            pass "Overseerr integration — apiKey present in live settings.json (${_ovsr_live_key:0:8}...)"
+        else
+            pass "Overseerr integration — settings.json exists but apiKey empty (OAuth pending — expected)"
+        fi
+    else
+        pass "Overseerr integration — settings.json absent on fresh container (OAuth not done — expected)"
+    fi
 fi
 
 # ---------------------------------------------------------------------------

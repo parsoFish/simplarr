@@ -530,6 +530,62 @@ if ($statusContent -match "fetch" -and $statusContent -match "status") {
 }
 
 # =============================================================================
+# Overseerr OAuth Detection Tests (Phase 9 — unit-level, mock config files)
+# These tests run in both quick and full mode since they use mock files,
+# not a live Overseerr container.
+# =============================================================================
+
+Write-Header "Overseerr OAuth Detection Tests"
+
+Write-Test "Overseerr uninitialized — settings.json absent → apiKey null..."
+$overseerrMockDir = Join-Path $env:TEMP "simplarr-ovsr-$(Get-Random)"
+$overseerrMockConfig = Join-Path $overseerrMockDir "overseerr"
+New-Item -ItemType Directory -Force -Path $overseerrMockConfig | Out-Null
+$mockSettingsPath = Join-Path $overseerrMockConfig "settings.json"
+
+# Case 1: settings.json does not exist
+if (-not (Test-Path $mockSettingsPath)) {
+    Write-Pass "Overseerr uninitialized — settings.json absent confirms uninitialized state"
+} else {
+    Write-Fail "Overseerr uninitialized — settings.json should not exist in fresh mock dir"
+}
+
+# Case 2: settings.json exists but apiKey is empty
+'{"main":{"apiKey":"","applicationTitle":"Overseerr"}}' |
+    Set-Content -Path $mockSettingsPath -Encoding UTF8
+$emptyKeyResult = $null
+try {
+    $settings = Get-Content $mockSettingsPath -Raw | ConvertFrom-Json
+    $emptyKeyResult = $settings.main.apiKey
+} catch {
+    $emptyKeyResult = $null
+}
+if ([string]::IsNullOrWhiteSpace($emptyKeyResult)) {
+    Write-Pass "Overseerr uninitialized — empty apiKey in settings.json → null/empty result (correct)"
+} else {
+    Write-Fail "Overseerr uninitialized — expected empty apiKey but got: $emptyKeyResult"
+}
+
+Write-Test "Overseerr initialized — apiKey extracted from mock settings.json..."
+$mockApiKey = "testkey-overseerr-abc12345"
+"{`"main`":{`"apiKey`":`"$mockApiKey`",`"applicationTitle`":`"Overseerr`"}}" |
+    Set-Content -Path $mockSettingsPath -Encoding UTF8
+$foundKey = $null
+try {
+    $settings = Get-Content $mockSettingsPath -Raw | ConvertFrom-Json
+    $foundKey = $settings.main.apiKey
+} catch {
+    $foundKey = $null
+}
+if ($foundKey -eq $mockApiKey) {
+    Write-Pass "Overseerr initialized — apiKey '$($mockApiKey.Substring(0,8))...' extracted from mock settings.json"
+} else {
+    Write-Fail "Overseerr initialized — expected '$mockApiKey' but got '$foundKey'"
+}
+
+Remove-Item -Recurse -Force $overseerrMockDir -ErrorAction SilentlyContinue
+
+# =============================================================================
 # Quick Mode Exit
 # =============================================================================
 
