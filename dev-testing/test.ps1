@@ -28,6 +28,7 @@ $script:TestsSkipped = 0
 # =============================================================================
 
 function Write-Header {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host ""
     Write-Host "=================================================================" -ForegroundColor Cyan
@@ -36,12 +37,14 @@ function Write-Header {
 }
 
 function Write-Test {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host "[TEST] " -ForegroundColor Blue -NoNewline
     Write-Host $Message
 }
 
 function Write-Pass {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host "[PASS] " -ForegroundColor Green -NoNewline
     Write-Host $Message
@@ -49,6 +52,7 @@ function Write-Pass {
 }
 
 function Write-Fail {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host "[FAIL] " -ForegroundColor Red -NoNewline
     Write-Host $Message
@@ -56,6 +60,7 @@ function Write-Fail {
 }
 
 function Write-Skip {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host "[SKIP] " -ForegroundColor Yellow -NoNewline
     Write-Host $Message
@@ -63,17 +68,66 @@ function Write-Skip {
 }
 
 function Write-Info {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host "[INFO] " -ForegroundColor Blue -NoNewline
     Write-Host $Message
 }
 
 function Write-Warn {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
     param([string]$Message)
     Write-Host "[WARN] " -ForegroundColor DarkYellow -NoNewline
     Write-Host $Message
     $script:TestsPassed++  # Warning counts as pass but with note
 }
+
+function Show-TestHelp {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
+    param()
+    Write-Host "Usage: .\test.ps1 [OPTIONS]"
+    Write-Host ""
+    Write-Host "Options:"
+    Write-Host "  -Quick      Skip container startup tests (syntax/file checks only)"
+    Write-Host "  -Cleanup    Clean up test containers after running"
+    Write-Host "  -Help       Show this help message"
+}
+
+
+function Write-ServiceUrl {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification='Write-Host is required for colored terminal output in this interactive test script')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', 'QbPassword', Justification='Password is retrieved from Docker logs for display only; SecureString is not applicable here')]
+    param(
+        [string]$TestDir,
+        [string]$QbPassword
+    )
+    Write-Info "Test containers are still running. Access the services at:"
+    Write-Host ""
+    Write-Host "    Homepage:    http://localhost/" -ForegroundColor Cyan
+    Write-Host "    Status:      http://localhost/status" -ForegroundColor Cyan
+    Write-Host "    qBittorrent: http://localhost:8080/" -ForegroundColor Cyan
+    Write-Host "    Radarr:      http://localhost:7878/" -ForegroundColor Cyan
+    Write-Host "    Sonarr:      http://localhost:8989/" -ForegroundColor Cyan
+    Write-Host "    Prowlarr:    http://localhost:9696/" -ForegroundColor Cyan
+    Write-Host "    Tautulli:    http://localhost:8181/" -ForegroundColor Cyan
+    Write-Host "    Overseerr:   http://localhost:5055/" -ForegroundColor Cyan
+    Write-Host ""
+
+    if ($QbPassword) {
+        Write-Host "  +----------------------------------------------------+" -ForegroundColor Yellow
+        Write-Host "  |  qBittorrent Credentials:                          |" -ForegroundColor Yellow
+        Write-Host "  |    Username: admin                                 |" -ForegroundColor Yellow
+        Write-Host "  |    Password: $($QbPassword.PadRight(35))|" -ForegroundColor Yellow
+        Write-Host "  +----------------------------------------------------+" -ForegroundColor Yellow
+        Write-Host ""
+    }
+
+    Write-Host '  Homepage links to services via direct ports (no UrlBase needed).' -ForegroundColor DarkGray
+    Write-Host ""
+    Write-Host "  To clean up:" -ForegroundColor Yellow
+    Write-Host "    cd $TestDir; docker compose -f docker-compose-test.yml down -v; cd ..; Remove-Item -Recurse $TestDir"
+}
+
 
 function Test-ServiceReady {
     param(
@@ -94,7 +148,8 @@ function Test-ServiceReady {
             }
             # Service not ready yet
         } catch {
-            # Other errors, service not ready
+            # Other errors (connection refused, DNS failure, etc.) - service not ready
+            Write-Verbose "Service not ready: $_"
         }
         Start-Sleep -Seconds 2
     }
@@ -106,12 +161,7 @@ function Test-ServiceReady {
 # =============================================================================
 
 if ($Help) {
-    Write-Host "Usage: .\test.ps1 [OPTIONS]"
-    Write-Host ""
-    Write-Host "Options:"
-    Write-Host "  -Quick      Skip container startup tests (syntax/file checks only)"
-    Write-Host "  -Cleanup    Clean up test containers after running"
-    Write-Host "  -Help       Show this help message"
+    Show-TestHelp
     exit 0
 }
 
@@ -212,7 +262,7 @@ $env:PLEX_CLAIM = "claim-test"
 $env:DOCKER_CONFIG = "$env:TEMP\simplarr-test\config"
 $env:DOCKER_MEDIA = "$env:TEMP\simplarr-test\media"
 
-$composeResult = docker compose -f docker-compose-unified.yml config 2>&1
+$null = docker compose -f docker-compose-unified.yml config 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Pass "docker-compose-unified.yml is valid"
 } else {
@@ -220,7 +270,7 @@ if ($LASTEXITCODE -eq 0) {
 }
 
 Write-Test "Validating docker-compose-nas.yml..."
-$composeResult = docker compose -f docker-compose-nas.yml config 2>&1
+$null = docker compose -f docker-compose-nas.yml config 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Pass "docker-compose-nas.yml is valid"
 } else {
@@ -229,7 +279,7 @@ if ($LASTEXITCODE -eq 0) {
 
 Write-Test "Validating docker-compose-pi.yml..."
 $env:NAS_IP = "192.168.1.100"
-$composeResult = docker compose -f docker-compose-pi.yml config 2>&1
+$null = docker compose -f docker-compose-pi.yml config 2>&1
 if ($LASTEXITCODE -eq 0) {
     Write-Pass "docker-compose-pi.yml is valid"
 } else {
@@ -657,7 +707,7 @@ if ($LASTEXITCODE -eq 0) {
     Write-Pass "Test containers started"
 } else {
     Write-Fail "Failed to start test containers"
-    Write-Host $startResult
+    Write-Output $startResult
 }
 
 # Wait for services
@@ -877,8 +927,7 @@ if (Test-Path $qbConfigPath) {
     $qbConf = Get-Content -Raw $qbConfigPath
     $hasPreferences = $qbConf -match "\[Preferences\]"
     $hasWebUI = $qbConf -match "WebUI"
-    $hasDownloadsPath = $qbConf -match "DefaultSavePath.*downloads" -or $qbConf -match "TempPath.*downloads"
-    
+
     if ($hasPreferences -and $hasWebUI) {
         Write-Pass "qBittorrent config has valid structure"
     } else {
@@ -912,8 +961,7 @@ $tautulliConfigPath = "$testDir\config\tautulli\config.ini"
 if (Test-Path $tautulliConfigPath) {
     $tautulliConf = Get-Content -Raw $tautulliConfigPath
     $hasHttpPort = $tautulliConf -match "http_port\s*=\s*8181"
-    $hasHttpRoot = $tautulliConf -match "http_root\s*="
-    
+
     if ($hasHttpPort) {
         Write-Pass "Tautulli config.ini has valid structure"
     } else {
@@ -1404,23 +1452,23 @@ if ($radarrApiKey) {
     $radarrRoot = (Invoke-RestMethod -Uri "http://localhost:7878/api/v3/rootfolder" -Headers @{"X-Api-Key" = $radarrApiKey} -TimeoutSec 10).Count
     $radarrClients = (Invoke-RestMethod -Uri "http://localhost:7878/api/v3/downloadclient" -Headers @{"X-Api-Key" = $radarrApiKey} -TimeoutSec 10).Count
     $radarrIndexers = (Invoke-RestMethod -Uri "http://localhost:7878/api/v3/indexer" -Headers @{"X-Api-Key" = $radarrApiKey} -TimeoutSec 10).Count
-    Write-Host "    Radarr:   $radarrRoot root folder(s), $radarrClients download client(s), $radarrIndexers indexer(s)" -ForegroundColor Cyan
+    Write-Info "    Radarr:   $radarrRoot root folder(s), $radarrClients download client(s), $radarrIndexers indexer(s)"
 }
 
 if ($sonarrApiKey) {
     $sonarrRoot = (Invoke-RestMethod -Uri "http://localhost:8989/api/v3/rootfolder" -Headers @{"X-Api-Key" = $sonarrApiKey} -TimeoutSec 10).Count
     $sonarrClients = (Invoke-RestMethod -Uri "http://localhost:8989/api/v3/downloadclient" -Headers @{"X-Api-Key" = $sonarrApiKey} -TimeoutSec 10).Count
     $sonarrIndexers = (Invoke-RestMethod -Uri "http://localhost:8989/api/v3/indexer" -Headers @{"X-Api-Key" = $sonarrApiKey} -TimeoutSec 10).Count
-    Write-Host "    Sonarr:   $sonarrRoot root folder(s), $sonarrClients download client(s), $sonarrIndexers indexer(s)" -ForegroundColor Cyan
+    Write-Info "    Sonarr:   $sonarrRoot root folder(s), $sonarrClients download client(s), $sonarrIndexers indexer(s)"
 }
 
 if ($prowlarrApiKey) {
     $prowlarrIndexers = (Invoke-RestMethod -Uri "http://localhost:9696/api/v1/indexer" -Headers @{"X-Api-Key" = $prowlarrApiKey} -TimeoutSec 10).Count
     $prowlarrApps = (Invoke-RestMethod -Uri "http://localhost:9696/api/v1/applications" -Headers @{"X-Api-Key" = $prowlarrApiKey} -TimeoutSec 10).Count
-    Write-Host "    Prowlarr: $prowlarrIndexers indexer(s), $prowlarrApps connected app(s)" -ForegroundColor Cyan
+    Write-Info "    Prowlarr: $prowlarrIndexers indexer(s), $prowlarrApps connected app(s)"
 }
 
-Write-Host ""
+Write-Output ""
 
 # =============================================================================
 # Cleanup
@@ -1436,32 +1484,7 @@ if ($Cleanup) {
     Remove-Item -Recurse -Force $testDir -ErrorAction SilentlyContinue
     Write-Pass "Test environment cleaned up"
 } else {
-    Write-Info "Test containers are still running. Access the services at:"
-    Write-Host ""
-    Write-Host "    Homepage:    http://localhost/" -ForegroundColor Cyan
-    Write-Host "    Status:      http://localhost/status" -ForegroundColor Cyan
-    Write-Host "    qBittorrent: http://localhost:8080/" -ForegroundColor Cyan
-    Write-Host "    Radarr:      http://localhost:7878/" -ForegroundColor Cyan
-    Write-Host "    Sonarr:      http://localhost:8989/" -ForegroundColor Cyan
-    Write-Host "    Prowlarr:    http://localhost:9696/" -ForegroundColor Cyan
-    Write-Host "    Tautulli:    http://localhost:8181/" -ForegroundColor Cyan
-    Write-Host "    Overseerr:   http://localhost:5055/" -ForegroundColor Cyan
-    Write-Host ""
-    
-    # Display qBittorrent credentials prominently
-    if ($qbPassword) {
-        Write-Host "  +----------------------------------------------------+" -ForegroundColor Yellow
-        Write-Host "  |  qBittorrent Credentials:                          |" -ForegroundColor Yellow
-        Write-Host "  |    Username: admin                                 |" -ForegroundColor Yellow
-        Write-Host "  |    Password: $($qbPassword.PadRight(35))|" -ForegroundColor Yellow
-        Write-Host "  +----------------------------------------------------+" -ForegroundColor Yellow
-        Write-Host ""
-    }
-    
-    Write-Host '  Homepage links to services via direct ports (no UrlBase needed).' -ForegroundColor DarkGray
-    Write-Host ""
-    Write-Host "  To clean up:" -ForegroundColor Yellow
-    Write-Host "    cd $testDir; docker compose -f docker-compose-test.yml down -v; cd ..; Remove-Item -Recurse $testDir"
+    Write-ServiceUrl -TestDir $testDir -QbPassword $qbPassword
     Write-Skip "Cleanup (use -Cleanup flag to auto-clean)"
 }
 
@@ -1475,22 +1498,18 @@ Write-Header "Test Summary"
 
 $totalTests = $script:TestsPassed + $script:TestsFailed + $script:TestsSkipped
 
-Write-Host ""
-Write-Host "  Passed:  " -ForegroundColor Green -NoNewline
-Write-Host $script:TestsPassed
-Write-Host "  Failed:  " -ForegroundColor Red -NoNewline
-Write-Host $script:TestsFailed
-Write-Host "  Skipped: " -ForegroundColor Yellow -NoNewline
-Write-Host $script:TestsSkipped
-Write-Host "  Total:   " -NoNewline
-Write-Host $totalTests
-Write-Host ""
+Write-Output ""
+Write-Output "  Passed:  $($script:TestsPassed)"
+Write-Output "  Failed:  $($script:TestsFailed)"
+Write-Output "  Skipped: $($script:TestsSkipped)"
+Write-Output "  Total:   $totalTests"
+Write-Output ""
 
 if ($script:TestsFailed -eq 0) {
-    Write-Host "All tests passed!" -ForegroundColor Green
+    Write-Output "All tests passed!"
     exit 0
 } else {
-    Write-Host "Some tests failed. Please review the output above." -ForegroundColor Red
+    Write-Output "Some tests failed. Please review the output above."
     exit 1
 }
 

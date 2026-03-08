@@ -1,0 +1,1023 @@
+#!/bin/bash
+# =============================================================================
+# Simplarr Test Suite — Phases 1–9 (Bash)
+# =============================================================================
+# Self-contained test runner covering preflight, file existence, syntax
+# validation, nginx config content checks, qBittorrent template validation,
+# setup script validation, configure script validation, container startup,
+# and live service API integration. Mirrors dev-testing/test.ps1 phases 1–7.
+#
+# Usage:
+#   ./dev-testing/test.sh
+#
+# Exit Codes:
+#   0 - All tests passed
+#   1 - One or more tests failed
+#
+# Requirements:
+#   - bash >= 4.0
+#   - docker (optional; phases that need it are skipped when unavailable)
+#
+# Environment Variables (Phases 8–9):
+#   SIMPLARR_TEST_TIMEOUT   — seconds to wait for container health (default: 120)
+#   SIMPLARR_TEST_BASE_PORT — override random base port for test services
+#
+# Phases:
+#   1  Preflight     — Docker and docker compose availability
+#   2  File       — Required project files exist
+#   3  Syntax     — bash -n, docker compose config --quiet, nginx -t
+#   4  Nginx      — Upstream proxy_pass targets and location routes
+#   5  qBittorrent — Template/config validation (static analysis only)
+#   6  Setup      — setup.sh env vars, modes, qBittorrent template deploy
+#   7  Configure     — configure.sh/configure.ps1 API function presence
+#   8  Container     — Spin up isolated stack; verify all health checks pass
+#   9  Connectivity  — Health endpoints, config.xml creation, get_arr_api_key
+# =============================================================================
+
+set -uo pipefail
+
+# ---------------------------------------------------------------------------
+# Setup
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+BOLD='\033[1m'
+
+PASS_COUNT=0
+FAIL_COUNT=0
+SKIP_COUNT=0
+
+# Temp directory for nginx wrapper configs — cleaned up on exit
+_TMPDIR=""
+
+# Docker integration test state — set by Phase 8, consumed by cleanup and Phase 9
+_COMPOSE_PROJECT_NAME=""
+_TEST_CONFIG_DIR=""
+_PHASE8_SUCCESS=false
+_TEST_BASE_PORT=0
+
+# Per-service host ports — assigned by Phase 8 from a random base; zero until set
+PORT_RADARR=0
+PORT_SONARR=0
+PORT_PROWLARR=0
+PORT_OVERSEERR=0
+PORT_QBITTORRENT=0
+PORT_QBIT_TORRENT=0
+PORT_TAUTULLI=0
+
+# ---------------------------------------------------------------------------
+# Cleanup
+# ---------------------------------------------------------------------------
+
+# shellcheck disable=SC2317  # reason: called indirectly via EXIT trap
+cleanup() {
+    if [[ -n "${_TMPDIR}" && -d "${_TMPDIR}" ]]; then
+        rm -rf "${_TMPDIR}"
+    fi
+
+    # Tear down any Docker containers and volumes started by Phase 8.
+    # Runs unconditionally on EXIT (success or failure) to prevent dangling
+    # containers from polluting the host. The COMPOSE_PROJECT_NAME ensures we
+    # only touch the test-run-specific stack, never a production deployment.
+    if [[ -n "${_COMPOSE_PROJECT_NAME}" && "${COMPOSE_AVAILABLE}" == "true" ]]; then
+        printf "\n  [cleanup] Removing test containers (project: %s)...\n" \
+            "${_COMPOSE_PROJECT_NAME}"
+        COMPOSE_PROJECT_NAME="${_COMPOSE_PROJECT_NAME}" \
+            "${COMPOSE_CMD[@]}" \
+            -f "${_TEST_CONFIG_DIR}/compose-override.yml" \
+            down --volumes --remove-orphans >/dev/null 2>&1 || true
+        printf "  [cleanup] Docker teardown complete.\n"
+    fi
+
+    if [[ -n "${_TEST_CONFIG_DIR}" && -d "${_TEST_CONFIG_DIR}" ]]; then
+        # Container processes may create files owned by a different UID; chmod
+        # before removal ensures we can delete them without needing sudo.
+        chmod -R a+rwX "${_TEST_CONFIG_DIR}" 2>/dev/null || true
+        rm -rf "${_TEST_CONFIG_DIR}" 2>/dev/null || true
+    fi
+}
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+pass() {
+    printf "  %b[PASS]%b %s\n" "${GREEN}" "${NC}" "$1"
+    (( PASS_COUNT++ )) || true
+}
+
+fail() {
+    printf "  %b[FAIL]%b %s\n" "${RED}" "${NC}" "$1"
+    (( FAIL_COUNT++ )) || true
+}
+
+skip() {
+    printf "  %b[SKIP]%b %s\n" "${YELLOW}" "${NC}" "$1"
+    (( SKIP_COUNT++ )) || true
+}
+
+info() {
+    printf "  %b[INFO]%b %s\n" "${BLUE}" "${NC}" "$1"
+}
+
+section() {
+    printf "\n%b%s%b\n" "${BOLD}${CYAN}" "$1" "${NC}"
+    printf "%b%s%b\n" "${CYAN}" "────────────────────────────────────────────────────────────" "${NC}"
+}
+
+# ---------------------------------------------------------------------------
+# Header
+# ---------------------------------------------------------------------------
+
+printf "\n%b" "${BOLD}${CYAN}"
+printf "════════════════════════════════════════════════════════════\n"
+printf "  Simplarr Test Suite — Phases 1–9\n"
+printf "════════════════════════════════════════════════════════════\n"
+printf "%b\n" "${NC}"
+
+# ---------------------------------------------------------------------------
+# Phase 1: Preflight — Tool availability
+# ---------------------------------------------------------------------------
+
+section "Phase 1: Preflight"
+
+DOCKER_AVAILABLE=false
+
+if command -v docker &>/dev/null; then
+    DOCKER_VERSION=$(docker --version 2>/dev/null || true)
+    info "Docker: ${DOCKER_VERSION}"
+    pass "docker is installed"
+    DOCKER_AVAILABLE=true
+else
+    fail "docker is not installed or not in PATH"
+fi
+
+COMPOSE_AVAILABLE=false
+declare -a COMPOSE_CMD=()
+
+if [[ "${DOCKER_AVAILABLE}" == "true" ]]; then
+    if docker compose version &>/dev/null 2>&1; then
+        COMPOSE_VERSION=$(docker compose version 2>/dev/null || true)
+        info "Compose: ${COMPOSE_VERSION}"
+        pass "docker compose (plugin) is available"
+        COMPOSE_CMD=("docker" "compose")
+        COMPOSE_AVAILABLE=true
+    elif command -v docker-compose &>/dev/null; then
+        COMPOSE_VERSION=$(docker-compose version 2>/dev/null || true)
+        info "Compose: ${COMPOSE_VERSION}"
+        pass "docker-compose (standalone) is available"
+        COMPOSE_CMD=("docker-compose")
+        COMPOSE_AVAILABLE=true
+    else
+        fail "neither 'docker compose' plugin nor 'docker-compose' standalone is available"
+    fi
+else
+    skip "docker compose check — docker not available"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 2: File Existence
+# ---------------------------------------------------------------------------
+
+section "Phase 2: File Existence"
+
+declare -a REQUIRED_FILES=(
+    "docker-compose-unified.yml"
+    "docker-compose-nas.yml"
+    "docker-compose-pi.yml"
+    "setup.sh"
+    "setup.ps1"
+    "configure.sh"
+    "configure.ps1"
+    "preflight.sh"
+    "preflight.ps1"
+    "nginx/unified.conf"
+    "nginx/split.conf"
+    "homepage/index.html"
+    "homepage/status.html"
+    "homepage/Dockerfile"
+    "templates/qBittorrent/qBittorrent.conf"
+)
+
+for rel_path in "${REQUIRED_FILES[@]}"; do
+    abs_path="${PROJECT_ROOT}/${rel_path}"
+    if [[ -f "${abs_path}" ]]; then
+        pass "${rel_path} exists"
+    else
+        fail "${rel_path} is missing (expected at ${abs_path})"
+    fi
+done
+
+# ---------------------------------------------------------------------------
+# Phase 3: Syntax Validation
+# ---------------------------------------------------------------------------
+
+section "Phase 3: Syntax Validation"
+
+# -- 3a: bash -n on all .sh files ------------------------------------------
+
+printf "\n"
+info "Bash syntax checks (bash -n)"
+
+declare -a BASH_SCRIPTS=(
+    "setup.sh"
+    "configure.sh"
+    "preflight.sh"
+    "utility/check_nas_mounts.sh"
+)
+
+for rel_path in "${BASH_SCRIPTS[@]}"; do
+    abs_path="${PROJECT_ROOT}/${rel_path}"
+    if [[ ! -f "${abs_path}" ]]; then
+        fail "bash -n ${rel_path} — file not found"
+        continue
+    fi
+    SYNTAX_ERR=""
+    if SYNTAX_ERR=$(bash -n "${abs_path}" 2>&1); then
+        pass "bash -n ${rel_path} — no syntax errors"
+    else
+        fail "bash -n ${rel_path} — syntax error: ${SYNTAX_ERR}"
+    fi
+done
+
+# -- 3b: docker compose config --quiet on all three compose files -----------
+
+printf "\n"
+info "Docker Compose config validation (docker compose config --quiet)"
+
+declare -a COMPOSE_FILES=(
+    "docker-compose-unified.yml"
+    "docker-compose-nas.yml"
+    "docker-compose-pi.yml"
+)
+
+if [[ "${COMPOSE_AVAILABLE}" == "true" ]]; then
+    # Export dummy env vars so compose can interpolate all variable references
+    export PUID="1000"
+    export PGID="1000"
+    export TZ="UTC"
+    export PLEX_CLAIM="claim-test"
+    export DOCKER_CONFIG="/tmp/simplarr-test/config"
+    export DOCKER_MEDIA="/tmp/simplarr-test/media"
+    export NAS_IP="192.168.1.100"
+    export OPENVPN_USER="test-user"
+    export OPENVPN_PASSWORD="test-password"
+    export VPN_SERVICE_PROVIDER="mullvad"
+    export VPN_SERVER_COUNTRIES="Netherlands"
+    export WIREGUARD_PRIVATE_KEY="test-key"
+    export WIREGUARD_ADDRESSES="10.64.0.1/32"
+
+    for rel_path in "${COMPOSE_FILES[@]}"; do
+        abs_path="${PROJECT_ROOT}/${rel_path}"
+        if [[ ! -f "${abs_path}" ]]; then
+            fail "docker compose config --quiet ${rel_path} — file not found"
+            continue
+        fi
+        COMPOSE_ERR=""
+        if COMPOSE_ERR=$("${COMPOSE_CMD[@]}" -f "${abs_path}" config --quiet 2>&1); then
+            pass "docker compose config --quiet ${rel_path} — valid"
+        else
+            fail "docker compose config --quiet ${rel_path} — invalid: ${COMPOSE_ERR}"
+        fi
+    done
+else
+    for rel_path in "${COMPOSE_FILES[@]}"; do
+        skip "docker compose config --quiet ${rel_path} — docker compose not available"
+    done
+fi
+
+# -- 3c: nginx -t via docker run on unified.conf and split.conf -------------
+
+printf "\n"
+info "Nginx syntax validation (nginx -t via docker run)"
+
+declare -a NGINX_CONFS=(
+    "nginx/unified.conf"
+    "nginx/split.conf"
+)
+
+if [[ "${DOCKER_AVAILABLE}" == "true" ]]; then
+    # The nginx conf files are server-block fragments; they require an http{}
+    # wrapper to form a complete nginx config that nginx -t can validate.
+    _TMPDIR="$(mktemp -d)"
+    cat > "${_TMPDIR}/nginx-wrapper.conf" <<'NGINX_WRAPPER'
+events {}
+http {
+    include /tmp/simplarr-test.conf;
+}
+NGINX_WRAPPER
+
+    for rel_path in "${NGINX_CONFS[@]}"; do
+        abs_path="${PROJECT_ROOT}/${rel_path}"
+        if [[ ! -f "${abs_path}" ]]; then
+            fail "nginx -t ${rel_path} — file not found"
+            continue
+        fi
+        NGINX_ERR=""
+        if NGINX_ERR=$(docker run --rm \
+            -v "${abs_path}:/tmp/simplarr-test.conf:ro" \
+            -v "${_TMPDIR}/nginx-wrapper.conf:/etc/nginx/nginx.conf:ro" \
+            nginx:alpine nginx -t 2>&1); then
+            pass "nginx -t ${rel_path} — syntax is ok"
+        else
+            fail "nginx -t ${rel_path} — syntax error: ${NGINX_ERR}"
+        fi
+    done
+else
+    for rel_path in "${NGINX_CONFS[@]}"; do
+        skip "nginx -t ${rel_path} — docker not available"
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 4: Nginx Config Content Checks
+# ---------------------------------------------------------------------------
+
+section "Phase 4: Nginx Config Content Checks"
+
+# -- 4a: unified.conf -------------------------------------------------------
+
+UNIFIED_CONF="${PROJECT_ROOT}/nginx/unified.conf"
+
+if [[ -f "${UNIFIED_CONF}" ]]; then
+    printf "\n"
+    info "unified.conf — location routes"
+
+    declare -a UNIFIED_ROUTES=(
+        "/plex"
+        "/radarr"
+        "/sonarr"
+        "/prowlarr"
+        "/overseerr"
+        "/torrent"
+        "/tautulli"
+        "/status"
+    )
+
+    for route in "${UNIFIED_ROUTES[@]}"; do
+        # Match both exact-match (location = /route) and prefix (location /route)
+        if grep -qE "location[[:space:]]+(=[[:space:]]+)?${route}([[:space:]]|$|\{)" "${UNIFIED_CONF}"; then
+            pass "unified.conf — location ${route} is present"
+        else
+            fail "unified.conf — missing location ${route}"
+        fi
+    done
+
+    printf "\n"
+    info "unified.conf — service upstream proxy_pass targets"
+
+    declare -a UNIFIED_UPSTREAMS=(
+        "radarr:7878"
+        "sonarr:8989"
+        "prowlarr:9696"
+        "overseerr:5055"
+        "tautulli:8181"
+        "qbittorrent:8080"
+    )
+
+    for upstream in "${UNIFIED_UPSTREAMS[@]}"; do
+        if grep -q "${upstream}" "${UNIFIED_CONF}"; then
+            pass "unified.conf — upstream ${upstream} is present"
+        else
+            fail "unified.conf — missing upstream ${upstream}"
+        fi
+    done
+else
+    skip "unified.conf content checks — file not found"
+fi
+
+# -- 4b: split.conf ---------------------------------------------------------
+
+SPLIT_CONF="${PROJECT_ROOT}/nginx/split.conf"
+
+if [[ -f "${SPLIT_CONF}" ]]; then
+    printf "\n"
+    info "split.conf — location routes"
+
+    declare -a SPLIT_ROUTES=(
+        "/plex"
+        "/radarr"
+        "/sonarr"
+        "/prowlarr"
+        "/overseerr"
+        "/torrent"
+        "/tautulli"
+        "/status"
+    )
+
+    for route in "${SPLIT_ROUTES[@]}"; do
+        if grep -qE "location[[:space:]]+(=[[:space:]]+)?${route}([[:space:]]|$|\{)" "${SPLIT_CONF}"; then
+            pass "split.conf — location ${route} is present"
+        else
+            fail "split.conf — missing location ${route}"
+        fi
+    done
+
+    printf "\n"
+    info "split.conf — service upstream proxy_pass targets (Pi-hosted services)"
+
+    # Pi-hosted services use named service upstreams
+    declare -a SPLIT_PI_UPSTREAMS=(
+        "radarr:7878"
+        "sonarr:8989"
+        "prowlarr:9696"
+        "overseerr:5055"
+        "tautulli:8181"
+    )
+
+    for upstream in "${SPLIT_PI_UPSTREAMS[@]}"; do
+        if grep -q "${upstream}" "${SPLIT_CONF}"; then
+            pass "split.conf — upstream ${upstream} is present"
+        else
+            fail "split.conf — missing upstream ${upstream}"
+        fi
+    done
+
+    printf "\n"
+    info "split.conf — NAS-hosted service proxy_pass targets"
+
+    # NAS-hosted services (plex, qbittorrent) use the IP placeholder
+    if grep -q "YOUR_NAS_IP:8080" "${SPLIT_CONF}"; then
+        pass "split.conf — qbittorrent NAS upstream (YOUR_NAS_IP:8080) is present"
+    else
+        fail "split.conf — missing qbittorrent NAS upstream (expected YOUR_NAS_IP:8080)"
+    fi
+
+    if grep -q "YOUR_NAS_IP:32400" "${SPLIT_CONF}"; then
+        pass "split.conf — plex NAS upstream (YOUR_NAS_IP:32400) is present"
+    else
+        fail "split.conf — missing plex NAS upstream (expected YOUR_NAS_IP:32400)"
+    fi
+else
+    skip "split.conf content checks — file not found"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 5: qBittorrent Template Validation
+# ---------------------------------------------------------------------------
+
+section "Phase 5: qBittorrent Template Validation"
+
+QBIT_CONF="${PROJECT_ROOT}/templates/qBittorrent/qBittorrent.conf"
+
+if [[ -f "${QBIT_CONF}" ]]; then
+    pass "templates/qBittorrent/qBittorrent.conf exists"
+
+    printf "\n"
+    info "qBittorrent.conf — download path settings"
+
+    # Session\DefaultSavePath must be set to a path
+    if grep -qF 'Session\DefaultSavePath=/downloads' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — Session\\DefaultSavePath=/downloads"
+    else
+        fail "qBittorrent.conf — Session\\DefaultSavePath=/downloads is missing"
+    fi
+
+    # Incomplete download path (TempPath) must be configured
+    if grep -qF 'Session\TempPath=/downloads/incomplete/' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — Session\\TempPath (incomplete path) is set"
+    else
+        fail "qBittorrent.conf — Session\\TempPath (incomplete path) is not configured"
+    fi
+
+    # Incomplete downloads must be enabled
+    if grep -qF 'Session\TempPathEnabled=true' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — Session\\TempPathEnabled=true"
+    else
+        fail "qBittorrent.conf — Session\\TempPathEnabled is not true"
+    fi
+
+    printf "\n"
+    info "qBittorrent.conf — tracker and connection settings"
+
+    # Public tracker auto-add must be enabled
+    if grep -qF 'Session\AddTrackersEnabled=true' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — Session\\AddTrackersEnabled=true"
+    else
+        fail "qBittorrent.conf — Session\\AddTrackersEnabled is not true"
+    fi
+
+    # DHT must be enabled
+    if grep -qF 'Session\DHTEnabled=true' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — Session\\DHTEnabled=true"
+    else
+        fail "qBittorrent.conf — Session\\DHTEnabled is not true"
+    fi
+
+    # GlobalMaxRatio must be configured (seeding limit)
+    if grep -qF 'Session\GlobalMaxRatio=' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — Session\\GlobalMaxRatio is configured"
+    else
+        fail "qBittorrent.conf — Session\\GlobalMaxRatio is not configured"
+    fi
+
+    printf "\n"
+    info "qBittorrent.conf — public tracker list"
+
+    # AdditionalTrackers must contain actual tracker announce URLs
+    if grep -qE 'AdditionalTrackers=.*tracker.*announce' "${QBIT_CONF}"; then
+        pass "qBittorrent.conf — public trackers are configured in AdditionalTrackers"
+    else
+        fail "qBittorrent.conf — public trackers not found in AdditionalTrackers"
+    fi
+else
+    fail "templates/qBittorrent/qBittorrent.conf is missing"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 6: Setup Script Validation
+# ---------------------------------------------------------------------------
+
+section "Phase 6: Setup Script Validation"
+
+SETUP_SH="${PROJECT_ROOT}/setup.sh"
+
+if [[ -f "${SETUP_SH}" ]]; then
+    printf "\n"
+    info "setup.sh — required environment variable prompts"
+
+    declare -a SETUP_ENV_VARS=(
+        "PUID"
+        "PGID"
+        "TZ"
+        "DOCKER_CONFIG"
+        "DOCKER_MEDIA"
+    )
+
+    for env_var in "${SETUP_ENV_VARS[@]}"; do
+        if grep -q "${env_var}" "${SETUP_SH}"; then
+            pass "setup.sh — ${env_var} prompt is present"
+        else
+            fail "setup.sh — missing prompt for ${env_var}"
+        fi
+    done
+
+    printf "\n"
+    info "setup.sh — deployment mode handling"
+
+    if grep -q "unified" "${SETUP_SH}" && grep -q "split" "${SETUP_SH}"; then
+        pass "setup.sh — supports both unified and split deployment modes"
+    else
+        fail "setup.sh — missing unified and/or split mode support"
+    fi
+
+    printf "\n"
+    info "setup.sh — qBittorrent template deployment"
+
+    # setup.sh must reference the qBittorrent template and copy it
+    if grep -qE 'qBittorrent.*\.conf|templates.*qBittorrent' "${SETUP_SH}"; then
+        pass "setup.sh — copies qBittorrent template"
+    else
+        fail "setup.sh — does not reference or copy qBittorrent template"
+    fi
+
+    printf "\n"
+    info "setup.ps1 — parity with setup.sh"
+
+    SETUP_PS1="${PROJECT_ROOT}/setup.ps1"
+    if [[ -f "${SETUP_PS1}" ]]; then
+        declare -a SETUP_PS_CHECKS=(
+            "PUID"
+            "PGID"
+            "unified"
+            "split"
+            "qBittorrent"
+        )
+
+        for check in "${SETUP_PS_CHECKS[@]}"; do
+            if grep -qi "${check}" "${SETUP_PS1}"; then
+                pass "setup.ps1 — '${check}' is present (parity with setup.sh)"
+            else
+                fail "setup.ps1 — '${check}' is missing (parity gap with setup.sh)"
+            fi
+        done
+    else
+        skip "setup.ps1 parity checks — setup.ps1 not found"
+    fi
+else
+    fail "setup.sh is missing"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 7: Configure Script Validation
+# ---------------------------------------------------------------------------
+
+section "Phase 7: Configure Script Validation"
+
+CONFIGURE_SH="${PROJECT_ROOT}/configure.sh"
+
+if [[ -f "${CONFIGURE_SH}" ]]; then
+    printf "\n"
+    info "configure.sh — required API functions"
+
+    declare -a CONFIGURE_SH_FUNCTIONS=(
+        "wait_for_service"
+        "get_arr_api_key"
+        "add_qbittorrent_to_radarr"
+        "add_qbittorrent_to_sonarr"
+        "add_radarr_to_prowlarr"
+        "add_sonarr_to_prowlarr"
+        "add_radarr_root_folder"
+        "add_sonarr_root_folder"
+        "add_public_indexers"
+        "sync_prowlarr_indexers"
+    )
+
+    for func in "${CONFIGURE_SH_FUNCTIONS[@]}"; do
+        if grep -qE "^${func}\(\)" "${CONFIGURE_SH}"; then
+            pass "configure.sh — function ${func}() is defined"
+        else
+            fail "configure.sh — missing function definition: ${func}()"
+        fi
+    done
+
+    printf "\n"
+    info "configure.ps1 — PowerShell parity checks"
+
+    CONFIGURE_PS1="${PROJECT_ROOT}/configure.ps1"
+    if [[ -f "${CONFIGURE_PS1}" ]]; then
+        # Parallel arrays: bash function name → PowerShell equivalent function name
+        declare -a SH_FUNC_NAMES=(
+            "wait_for_service"
+            "get_arr_api_key"
+            "add_qbittorrent_to_radarr"
+            "add_qbittorrent_to_sonarr"
+            "add_radarr_to_prowlarr"
+            "add_sonarr_to_prowlarr"
+            "add_radarr_root_folder"
+            "add_sonarr_root_folder"
+            "add_public_indexers"
+            "sync_prowlarr_indexers"
+        )
+        declare -a PS_FUNC_NAMES=(
+            "Wait-ForService"
+            "Get-ArrApiKey"
+            "Add-QBittorrentToRadarr"
+            "Add-QBittorrentToSonarr"
+            "Add-RadarrToProwlarr"
+            "Add-SonarrToProwlarr"
+            "Add-RadarrRootFolder"
+            "Add-SonarrRootFolder"
+            "Add-ProwlarrPublicIndexer"
+            "Sync-ProwlarrIndexer"
+        )
+
+        for i in "${!PS_FUNC_NAMES[@]}"; do
+            ps_func="${PS_FUNC_NAMES[$i]}"
+            sh_func="${SH_FUNC_NAMES[$i]}"
+            if grep -qE "^function ${ps_func}" "${CONFIGURE_PS1}"; then
+                pass "configure.ps1 — function ${ps_func} exists (parity: ${sh_func})"
+            else
+                fail "configure.ps1 — missing function ${ps_func} (parity gap for: ${sh_func})"
+            fi
+        done
+    else
+        skip "configure.ps1 parity checks — configure.ps1 not found"
+    fi
+else
+    fail "configure.sh is missing"
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 8: Container Startup
+# ---------------------------------------------------------------------------
+
+section "Phase 8: Container Startup"
+
+if [[ "${COMPOSE_AVAILABLE}" != "true" ]]; then
+    skip "Phase 8 — docker compose not available; skipping container integration tests"
+    skip "Phase 9 — skipped (docker compose not available)"
+else
+    _TIMEOUT="${SIMPLARR_TEST_TIMEOUT:-120}"
+    _COMPOSE_PROJECT_NAME="simplarr-test-$$"
+    _TEST_CONFIG_DIR="$(mktemp -d -t "simplarr-test-XXXXXX")"
+
+    printf "\n"
+    info "Project name : ${_COMPOSE_PROJECT_NAME}"
+    info "Config dir   : ${_TEST_CONFIG_DIR}"
+    info "Timeout      : ${_TIMEOUT}s"
+
+    # Pick a random base port to avoid conflicts with production services.
+    # Uses SIMPLARR_TEST_BASE_PORT env var if set; otherwise picks a random
+    # value in 20000–29999, safely above well-known and production ports.
+    if [[ -n "${SIMPLARR_TEST_BASE_PORT:-}" ]]; then
+        _TEST_BASE_PORT="${SIMPLARR_TEST_BASE_PORT}"
+    else
+        # RANDOM is 0–32767; shift into 20000–29999 range
+        _TEST_BASE_PORT=$(( (RANDOM % 10000) + 20000 ))
+    fi
+
+    PORT_RADARR=$(( _TEST_BASE_PORT + 0 ))
+    PORT_SONARR=$(( _TEST_BASE_PORT + 1 ))
+    PORT_PROWLARR=$(( _TEST_BASE_PORT + 2 ))
+    PORT_OVERSEERR=$(( _TEST_BASE_PORT + 3 ))
+    PORT_QBITTORRENT=$(( _TEST_BASE_PORT + 4 ))
+    PORT_QBIT_TORRENT=$(( _TEST_BASE_PORT + 5 ))
+    PORT_TAUTULLI=$(( _TEST_BASE_PORT + 6 ))
+
+    info "Base port    : ${_TEST_BASE_PORT} (range: ${_TEST_BASE_PORT}–$(( _TEST_BASE_PORT + 6 )))"
+    printf "\n"
+    info "Port map: radarr=${PORT_RADARR} sonarr=${PORT_SONARR} prowlarr=${PORT_PROWLARR}"
+    info "          overseerr=${PORT_OVERSEERR} qbittorrent=${PORT_QBITTORRENT} tautulli=${PORT_TAUTULLI}"
+
+    # Create per-service config directories on the host filesystem
+    for _svc8 in radarr sonarr prowlarr overseerr qbittorrent tautulli; do
+        mkdir -p "${_TEST_CONFIG_DIR}/${_svc8}"
+    done
+
+    pass "Created test config directories under ${_TEST_CONFIG_DIR}"
+
+    # Write a self-contained test compose file with remapped ports and isolated
+    # volumes. Uses the same image tags as production for parity. Shorter
+    # healthcheck intervals (10s vs 30s) speed up the test.
+    cat > "${_TEST_CONFIG_DIR}/compose-override.yml" << COMPOSE_EOF
+services:
+  radarr:
+    image: linuxserver/radarr:6.0.4.10291-ls294
+    ports:
+      - "${PORT_RADARR}:7878"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/radarr:/config
+    healthcheck:
+      test: curl -f http://localhost:7878/ping || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  sonarr:
+    image: linuxserver/sonarr:4.0.16.2944-ls303
+    ports:
+      - "${PORT_SONARR}:8989"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/sonarr:/config
+    healthcheck:
+      test: curl -f http://localhost:8989/ping || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  prowlarr:
+    image: linuxserver/prowlarr:2.3.0.5236-ls138
+    ports:
+      - "${PORT_PROWLARR}:9696"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/prowlarr:/config
+    healthcheck:
+      test: curl -f http://localhost:9696/ping || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  overseerr:
+    image: sctx/overseerr:1.35.0
+    ports:
+      - "${PORT_OVERSEERR}:5055"
+    environment:
+      - TZ=UTC
+      - LOG_LEVEL=info
+    volumes:
+      - ${_TEST_CONFIG_DIR}/overseerr:/app/config
+    healthcheck:
+      test: wget -q --spider http://localhost:5055/api/v1/status || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+    ports:
+      - "${PORT_QBITTORRENT}:8080"
+      - "${PORT_QBIT_TORRENT}:6881"
+      - "${PORT_QBIT_TORRENT}:6881/udp"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - WEBUI_PORT=8080
+    volumes:
+      - ${_TEST_CONFIG_DIR}/qbittorrent:/config
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+
+  tautulli:
+    image: linuxserver/tautulli:v2.16.1-ls217
+    ports:
+      - "${PORT_TAUTULLI}:8181"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+    volumes:
+      - ${_TEST_CONFIG_DIR}/tautulli:/config
+    healthcheck:
+      test: curl -f http://localhost:8181/status || exit 1
+      interval: 10s
+      timeout: 10s
+      retries: 8
+      start_period: 45s
+COMPOSE_EOF
+
+    pass "Generated self-contained test compose file (${_TEST_CONFIG_DIR}/compose-override.yml)"
+
+    # Start all test containers and block until every healthcheck passes.
+    # The EXIT trap (cleanup) will always run docker compose down --volumes,
+    # ensuring no dangling containers or volumes on success or failure.
+    printf "\n"
+    info "Running: docker compose up -d --wait (timeout: ${_TIMEOUT}s)"
+    info "Note: first run will pull images — this may take several minutes."
+
+    _COMPOSE_UP_EXIT=0
+    _COMPOSE_UP_OUTPUT=""
+    if _COMPOSE_UP_OUTPUT=$(
+        COMPOSE_PROJECT_NAME="${_COMPOSE_PROJECT_NAME}" \
+        timeout "${_TIMEOUT}" \
+        "${COMPOSE_CMD[@]}" \
+        -f "${_TEST_CONFIG_DIR}/compose-override.yml" \
+        up -d --wait 2>&1
+    ); then
+        pass "docker compose up --wait — all services reached healthy state"
+    else
+        _COMPOSE_UP_EXIT=$?
+        if [[ "${_COMPOSE_UP_EXIT}" -eq 124 ]]; then
+            fail "docker compose up --wait — timed out after ${_TIMEOUT}s"
+        else
+            fail "docker compose up --wait — failed (exit ${_COMPOSE_UP_EXIT})"
+        fi
+        info "Compose output: ${_COMPOSE_UP_OUTPUT}"
+    fi
+
+    # Double-check each container's health via docker inspect
+    printf "\n"
+    info "Verifying container health states via docker inspect..."
+
+    declare -a _PHASE8_SVCS=(radarr sonarr prowlarr overseerr qbittorrent tautulli)
+    _ALL_HEALTHY=true
+
+    for _svc8 in "${_PHASE8_SVCS[@]}"; do
+        _cid=$(
+            COMPOSE_PROJECT_NAME="${_COMPOSE_PROJECT_NAME}" \
+            "${COMPOSE_CMD[@]}" \
+            -f "${_TEST_CONFIG_DIR}/compose-override.yml" \
+            ps -q "${_svc8}" 2>/dev/null || true
+        )
+        if [[ -z "${_cid}" ]]; then
+            fail "Phase 8 — ${_svc8}: container not found in project ${_COMPOSE_PROJECT_NAME}"
+            _ALL_HEALTHY=false
+            continue
+        fi
+        _health=$(docker inspect --format='{{.State.Health.Status}}' "${_cid}" 2>/dev/null \
+            || echo "unknown")
+        if [[ "${_health}" == "healthy" ]]; then
+            pass "Phase 8 — ${_svc8}: healthy"
+        else
+            fail "Phase 8 — ${_svc8}: not healthy (status: ${_health})"
+            _ALL_HEALTHY=false
+        fi
+    done
+
+    if [[ "${_ALL_HEALTHY}" == "true" ]]; then
+        _PHASE8_SUCCESS=true
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 9: Service Connectivity
+# ---------------------------------------------------------------------------
+
+section "Phase 9: Service Connectivity"
+
+if [[ "${_PHASE8_SUCCESS}" != "true" ]]; then
+    skip "Phase 9 — skipped (Phase 8 did not complete successfully)"
+else
+    # -- 9a: Health endpoint connectivity -----------------------------------
+
+    printf "\n"
+    info "Hitting service health endpoints on remapped test ports..."
+
+    declare -a _CONN_SVCS=(
+        "radarr"
+        "sonarr"
+        "prowlarr"
+        "overseerr"
+        "qbittorrent"
+        "tautulli"
+    )
+    declare -a _CONN_URLS=(
+        "http://localhost:${PORT_RADARR}/ping"
+        "http://localhost:${PORT_SONARR}/ping"
+        "http://localhost:${PORT_PROWLARR}/ping"
+        "http://localhost:${PORT_OVERSEERR}/api/v1/status"
+        "http://localhost:${PORT_QBITTORRENT}/"
+        "http://localhost:${PORT_TAUTULLI}/status"
+    )
+
+    for _i in "${!_CONN_SVCS[@]}"; do
+        _svc9="${_CONN_SVCS[${_i}]}"
+        _url="${_CONN_URLS[${_i}]}"
+        _http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "${_url}" \
+            2>/dev/null || echo "000")
+        # 200 OK, 302 redirect, 401 unauthorised, 403 forbidden all confirm service is alive
+        if [[ "${_http_code}" =~ ^(200|302|401|403)$ ]]; then
+            pass "Phase 9 — ${_svc9} endpoint reachable (HTTP ${_http_code}): ${_url}"
+        else
+            fail "Phase 9 — ${_svc9} endpoint unreachable (HTTP ${_http_code}): ${_url}"
+        fi
+    done
+
+    # -- 9b: config.xml creation --------------------------------------------
+
+    printf "\n"
+    info "Polling for *arr config.xml files (written by services on first start)..."
+
+    declare -a _ARR_SVCS=(radarr sonarr prowlarr)
+
+    for _svc9 in "${_ARR_SVCS[@]}"; do
+        _cfg="${_TEST_CONFIG_DIR}/${_svc9}/config.xml"
+        _wait_start="${SECONDS}"
+        while [[ ! -f "${_cfg}" ]]; do
+            _elapsed=$(( SECONDS - _wait_start ))
+            if [[ "${_elapsed}" -ge 60 ]]; then
+                break
+            fi
+            sleep 2
+        done
+        if [[ -f "${_cfg}" ]]; then
+            pass "Phase 9 — ${_svc9}/config.xml created by service"
+        else
+            fail "Phase 9 — ${_svc9}/config.xml not found after 60s (service may not have initialised)"
+        fi
+    done
+
+    # -- 9c: get_arr_api_key extraction -------------------------------------
+
+    printf "\n"
+    info "Verifying get_arr_api_key extraction (same grep pattern as configure.sh)..."
+
+    for _svc9 in "${_ARR_SVCS[@]}"; do
+        _cfg="${_TEST_CONFIG_DIR}/${_svc9}/config.xml"
+        if [[ ! -f "${_cfg}" ]]; then
+            skip "get_arr_api_key — ${_svc9}: config.xml absent, skipping"
+            continue
+        fi
+        # Mirror configure.sh's get_arr_api_key(): grep -oP '(?<=<ApiKey>)[^<]+' config.xml
+        _api_key=$(grep -oP '(?<=<ApiKey>)[^<]+' "${_cfg}" 2>/dev/null || true)
+        if [[ -n "${_api_key}" && "${#_api_key}" -ge 16 ]]; then
+            pass "get_arr_api_key — ${_svc9}: key extracted (${_api_key:0:8}...)"
+        else
+            fail "get_arr_api_key — ${_svc9}: no valid API key found in config.xml"
+        fi
+    done
+fi
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+printf "\n%b" "${BOLD}${CYAN}"
+printf "════════════════════════════════════════════════════════════\n"
+printf "  Summary\n"
+printf "════════════════════════════════════════════════════════════\n"
+printf "%b\n" "${NC}"
+
+printf "  %bPassed:%b  %d\n" "${GREEN}" "${NC}" "${PASS_COUNT}"
+printf "  %bFailed:%b  %d\n" "${RED}" "${NC}" "${FAIL_COUNT}"
+printf "  %bSkipped:%b %d\n" "${YELLOW}" "${NC}" "${SKIP_COUNT}"
+printf "\n"
+
+if [[ "${FAIL_COUNT}" -eq 0 ]]; then
+    printf "  %bAll tests passed.%b\n\n" "${GREEN}${BOLD}" "${NC}"
+    exit 0
+else
+    printf "  %b%d test(s) failed. Fix the issues above before merging.%b\n\n" \
+        "${RED}${BOLD}" "${FAIL_COUNT}" "${NC}"
+    exit 1
+fi

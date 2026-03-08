@@ -1,0 +1,9 @@
+{
+  "name": "simplarr-homepage",
+  "version": "1.0.0",
+  "description": "ESLint tooling for Simplarr homepage JavaScript",
+  "private": true,
+  "devDependencies": {
+    "eslint": "^8.57.0"
+  }
+}

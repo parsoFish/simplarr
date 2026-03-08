@@ -21,9 +21,9 @@ BeforeAll {
     # Locate repo root (one level up from dev-testing/)
     $script:RepoRoot = Split-Path -Parent $PSScriptRoot
 
-    # Ensure PSScriptAnalyzer is available — install if missing
+    # Ensure PSScriptAnalyzer is available  -  install if missing
     if (-not (Get-Module -ListAvailable -Name PSScriptAnalyzer)) {
-        Write-Host "PSScriptAnalyzer not found — installing..." -ForegroundColor Yellow
+        Write-Warning "PSScriptAnalyzer not found - installing..."
         Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -ErrorAction Stop
     }
     Import-Module PSScriptAnalyzer -ErrorAction Stop
@@ -47,10 +47,10 @@ BeforeAll {
 }
 
 # =============================================================================
-# 1. PSScriptAnalyzer — Zero Warnings / Errors
+# 1. PSScriptAnalyzer  -  Zero Warnings / Errors
 # =============================================================================
 
-Describe 'PSScriptAnalyzer compliance — zero warnings and errors' {
+Describe 'PSScriptAnalyzer compliance  -  zero warnings and errors' {
 
     Context 'setup.ps1' {
         It 'should produce no PSScriptAnalyzer warnings or errors' {
@@ -127,10 +127,10 @@ Describe 'PSScriptAnalyzer compliance — zero warnings and errors' {
 }
 
 # =============================================================================
-# 2. Suppression Attributes — must have justification
+# 2. Suppression Attributes  -  must have justification
 # =============================================================================
 
-Describe 'SuppressMessageAttribute usage — justification required' {
+Describe 'SuppressMessageAttribute usage  -  justification required' {
 
     foreach ($name in @('setup.ps1', 'configure.ps1', 'preflight.ps1')) {
         Context $name {
@@ -155,11 +155,11 @@ Describe 'SuppressMessageAttribute usage — justification required' {
 }
 
 # =============================================================================
-# 3. Syntax validation — scripts must parse without errors
+# 3. Syntax validation  -  scripts must parse without errors
 #    (regression guard: fixes must not break PowerShell syntax)
 # =============================================================================
 
-Describe 'Script syntax — valid PowerShell after analyzer fixes' {
+Describe 'Script syntax  -  valid PowerShell after analyzer fixes' {
 
     foreach ($name in @('setup.ps1', 'configure.ps1', 'preflight.ps1')) {
         Context $name {
@@ -176,11 +176,11 @@ Describe 'Script syntax — valid PowerShell after analyzer fixes' {
 }
 
 # =============================================================================
-# 4. Behavioral regression — setup.ps1
+# 4. Behavioral regression  -  setup.ps1
 #    Validates that all key functionality is still present after rename/refactors.
 # =============================================================================
 
-Describe 'setup.ps1 — behavioral regression after PSScriptAnalyzer fixes' {
+Describe 'setup.ps1  -  behavioral regression after PSScriptAnalyzer fixes' {
 
     BeforeAll {
         $script:SetupContent = Get-Content -Raw $script:Scripts['setup.ps1']
@@ -225,7 +225,7 @@ Describe 'setup.ps1 — behavioral regression after PSScriptAnalyzer fixes' {
 
     It 'should still load existing .env values as defaults' {
         # The function that reads an existing .env (possibly renamed from Load-ExistingEnv)
-        # must still exist — check for the behavioral marker: reading .env key=value pairs
+        # must still exist  -  check for the behavioral marker: reading .env key=value pairs
         $script:SetupContent | Should -Match 'Get-Content.*FilePath|Get-Content.*EnvFile' `
             -Because 'setup.ps1 must still read an existing .env file to populate defaults'
     }
@@ -259,10 +259,10 @@ Describe 'setup.ps1 — behavioral regression after PSScriptAnalyzer fixes' {
 }
 
 # =============================================================================
-# 5. Behavioral regression — configure.ps1
+# 5. Behavioral regression  -  configure.ps1
 # =============================================================================
 
-Describe 'configure.ps1 — behavioral regression after PSScriptAnalyzer fixes' {
+Describe 'configure.ps1  -  behavioral regression after PSScriptAnalyzer fixes' {
 
     BeforeAll {
         $script:ConfigureContent = Get-Content -Raw $script:Scripts['configure.ps1']
@@ -336,10 +336,10 @@ Describe 'configure.ps1 — behavioral regression after PSScriptAnalyzer fixes' 
 }
 
 # =============================================================================
-# 6. Behavioral regression — preflight.ps1
+# 6. Behavioral regression  -  preflight.ps1
 # =============================================================================
 
-Describe 'preflight.ps1 — behavioral regression after PSScriptAnalyzer fixes' {
+Describe 'preflight.ps1  -  behavioral regression after PSScriptAnalyzer fixes' {
 
     BeforeAll {
         $script:PreflightContent = Get-Content -Raw $script:Scripts['preflight.ps1']
@@ -417,10 +417,10 @@ Describe 'preflight.ps1 — behavioral regression after PSScriptAnalyzer fixes' 
 }
 
 # =============================================================================
-# 7. Aggregate — all three scripts pass together (mirrors acceptance criteria)
+# 7. Aggregate  -  all three scripts pass together (mirrors acceptance criteria)
 # =============================================================================
 
-Describe 'Acceptance criteria — Invoke-ScriptAnalyzer across all scripts returns no results' {
+Describe 'Acceptance criteria  -  Invoke-ScriptAnalyzer across all scripts returns no results' {
 
     It 'zero PSScriptAnalyzer warnings or errors across setup.ps1, configure.ps1, and preflight.ps1 combined' {
         $allFindings = @()
@@ -430,7 +430,7 @@ Describe 'Acceptance criteria — Invoke-ScriptAnalyzer across all scripts retur
         }
 
         $report = $allFindings | ForEach-Object {
-            "  [$($_.Severity)] $($_.Script) line $($_.Line) — $($_.Rule): $($_.Message)"
+            "  [$($_.Severity)] $($_.Script) line $($_.Line)  -  $($_.Rule): $($_.Message)"
         }
 
         $allFindings | Should -BeNullOrEmpty `
