@@ -103,10 +103,10 @@ BeforeAll {
 }
 
 # =============================================================================
-# Section 1 — config.json.template
+# Section 1  -  config.json.template
 # =============================================================================
 
-Describe 'homepage/config.json.template — existence' {
+Describe 'homepage/config.json.template  -  existence' {
 
     It 'should exist at homepage/config.json.template' {
         $script:ConfigTemplate | Should -Exist `
@@ -119,7 +119,7 @@ Describe 'homepage/config.json.template — existence' {
     }
 }
 
-Describe 'homepage/config.json.template — required port placeholders' {
+Describe 'homepage/config.json.template  -  required port placeholders' {
 
     foreach ($var in $script:ServicePorts.Keys) {
         It "should contain the `${$var} placeholder" {
@@ -144,10 +144,10 @@ Describe 'homepage/config.json.template — required port placeholders' {
 }
 
 # =============================================================================
-# Section 2 — Dockerfile entrypoint
+# Section 2  -  Dockerfile entrypoint
 # =============================================================================
 
-Describe 'homepage/Dockerfile — entrypoint script reference' {
+Describe 'homepage/Dockerfile  -  entrypoint script reference' {
 
     It 'should exist at homepage/Dockerfile' {
         $script:Dockerfile | Should -Exist `
@@ -164,7 +164,7 @@ Describe 'homepage/Dockerfile — entrypoint script reference' {
     }
 }
 
-Describe 'homepage entrypoint script — envsubst and nginx' {
+Describe 'homepage entrypoint script  -  envsubst and nginx' {
 
     It 'should have an entrypoint shell script in homepage/' {
         $script:EntrypointScript | Should -Not -BeNullOrEmpty `
@@ -209,10 +209,10 @@ Describe 'homepage entrypoint script — envsubst and nginx' {
 }
 
 # =============================================================================
-# Section 3 — dashboard.js config fetch and fallback
+# Section 3  -  dashboard.js config fetch and fallback
 # =============================================================================
 
-Describe 'homepage/js/dashboard.js — fetches /config.json' {
+Describe 'homepage/js/dashboard.js  -  fetches /config.json' {
 
     It 'should exist at homepage/js/dashboard.js' {
         $script:DashboardJs | Should -Exist `
@@ -247,7 +247,7 @@ Describe 'homepage/js/dashboard.js — fetches /config.json' {
     }
 }
 
-Describe 'homepage/js/dashboard.js — fallback defaults match canonical ports' {
+Describe 'homepage/js/dashboard.js  -  fallback defaults match canonical ports' {
 
     foreach ($entry in $script:ServicePorts.GetEnumerator()) {
         $service = $entry.Key -replace '_PORT', '' -ToLower
@@ -272,17 +272,17 @@ Describe 'homepage/js/dashboard.js — fallback defaults match canonical ports' 
             $script:DashboardContent | Should -Match 'catch|fallback|defaults' `
                 -Because 'Hardcoded port values must only appear inside the catch/fallback block, not at the top level'
         } else {
-            # No bare services object — ports come from config.json (preferred pattern)
+            # No bare services object  -  ports come from config.json (preferred pattern)
             $true | Should -Be $true
         }
     }
 }
 
 # =============================================================================
-# Section 4 — status.js config fetch and fallback
+# Section 4  -  status.js config fetch and fallback
 # =============================================================================
 
-Describe 'homepage/js/status.js — fetches /config.json' {
+Describe 'homepage/js/status.js  -  fetches /config.json' {
 
     It 'should exist at homepage/js/status.js' {
         $script:StatusJs | Should -Exist `
@@ -313,7 +313,7 @@ Describe 'homepage/js/status.js — fetches /config.json' {
             return
         }
         $script:StatusContent | Should -Match 'checkAll|checkService' `
-            -Because 'The health-check functions must remain defined — removing them would be a behavioral regression'
+            -Because 'The health-check functions must remain defined  -  removing them would be a behavioral regression'
     }
 
     It 'should read port values from the fetched config object' {
@@ -326,7 +326,7 @@ Describe 'homepage/js/status.js — fetches /config.json' {
     }
 }
 
-Describe 'homepage/js/status.js — fallback defaults match canonical ports' {
+Describe 'homepage/js/status.js  -  fallback defaults match canonical ports' {
 
     foreach ($entry in $script:ServicePorts.GetEnumerator()) {
         $service = $entry.Key -replace '_PORT', '' -ToLower
@@ -343,10 +343,10 @@ Describe 'homepage/js/status.js — fallback defaults match canonical ports' {
 }
 
 # =============================================================================
-# Section 5 — docker-compose-unified.yml homepage env vars
+# Section 5  -  docker-compose-unified.yml homepage env vars
 # =============================================================================
 
-Describe 'docker-compose-unified.yml — homepage service passes port env vars' {
+Describe 'docker-compose-unified.yml  -  homepage service passes port env vars' {
 
     It 'should exist at docker-compose-unified.yml' {
         $script:ComposeUnified | Should -Exist `
@@ -366,10 +366,10 @@ Describe 'docker-compose-unified.yml — homepage service passes port env vars' 
 }
 
 # =============================================================================
-# Section 6 — docker-compose-pi.yml homepage env vars
+# Section 6  -  docker-compose-pi.yml homepage env vars
 # =============================================================================
 
-Describe 'docker-compose-pi.yml — homepage service passes port env vars' {
+Describe 'docker-compose-pi.yml  -  homepage service passes port env vars' {
 
     It 'should exist at docker-compose-pi.yml' {
         $script:ComposePi | Should -Exist `

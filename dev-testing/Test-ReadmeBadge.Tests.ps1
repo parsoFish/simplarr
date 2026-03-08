@@ -31,7 +31,7 @@ BeforeAll {
     $script:RepoRoot   = Split-Path -Parent $PSScriptRoot
     $script:ReadmePath = Join-Path $script:RepoRoot 'readme.md'
 
-    # GitHub repository details — must match the actual repository
+    # GitHub repository details  -  must match the actual repository
     $script:RepoOwner    = 'parsoFish'
     $script:RepoName     = 'simplarr'
     $script:WorkflowFile = 'ci.yml'
@@ -39,7 +39,7 @@ BeforeAll {
     $script:BadgeImageUrl   = "https://github.com/$($script:RepoOwner)/$($script:RepoName)/actions/workflows/$($script:WorkflowFile)/badge.svg"
     $script:WorkflowPageUrl = "https://github.com/$($script:RepoOwner)/$($script:RepoName)/actions/workflows/$($script:WorkflowFile)"
 
-    # Cache raw content — null when file is missing (tests must fail gracefully)
+    # Cache raw content  -  null when file is missing (tests must fail gracefully)
     $script:ReadmeContent = if (Test-Path $script:ReadmePath) {
         Get-Content -Raw $script:ReadmePath
     } else {
@@ -55,10 +55,10 @@ BeforeAll {
 }
 
 # =============================================================================
-# Phase 1 — File existence
+# Phase 1  -  File existence
 # =============================================================================
 
-Describe 'readme.md — file existence' {
+Describe 'readme.md  -  file existence' {
 
     It 'should exist at the project root' {
         $script:ReadmePath | Should -Exist `
@@ -72,10 +72,10 @@ Describe 'readme.md — file existence' {
 }
 
 # =============================================================================
-# Phase 2 — CI badge presence and format
+# Phase 2  -  CI badge presence and format
 # =============================================================================
 
-Describe 'CI badge — presence and correct format' {
+Describe 'CI badge  -  presence and correct format' {
 
     It 'should contain the GitHub Actions badge image URL for ci.yml' {
         if ($null -eq $script:ReadmeContent) {
@@ -107,10 +107,10 @@ Describe 'CI badge — presence and correct format' {
 }
 
 # =============================================================================
-# Phase 3 — CI badge link (badge must be clickable)
+# Phase 3  -  CI badge link (badge must be clickable)
 # =============================================================================
 
-Describe 'CI badge — clickable link to workflow page' {
+Describe 'CI badge  -  clickable link to workflow page' {
 
     It 'should wrap the badge image in a link to the CI workflow page' {
         if ($null -eq $script:ReadmeContent) {
@@ -134,10 +134,10 @@ Describe 'CI badge — clickable link to workflow page' {
 }
 
 # =============================================================================
-# Phase 4 — Badge position (before Early Release Notice)
+# Phase 4  -  Badge position (before Early Release Notice)
 # =============================================================================
 
-Describe 'CI badge — position in README' {
+Describe 'CI badge  -  position in README' {
 
     It 'should appear before the Early Release Notice callout' {
         if ($null -eq $script:ReadmeContent) {
@@ -186,10 +186,10 @@ Describe 'CI badge — position in README' {
 }
 
 # =============================================================================
-# Phase 5 — Development section content
+# Phase 5  -  Development section content
 # =============================================================================
 
-Describe 'Development section — test suite and CI requirement' {
+Describe 'Development section  -  test suite and CI requirement' {
 
     It 'should contain a Development section heading' {
         if ($null -eq $script:ReadmeContent) {
@@ -234,10 +234,10 @@ Describe 'Development section — test suite and CI requirement' {
 }
 
 # =============================================================================
-# Phase 6 — Aggregate acceptance criteria
+# Phase 6  -  Aggregate acceptance criteria
 # =============================================================================
 
-Describe 'Acceptance criteria — all README badge requirements satisfied' {
+Describe 'Acceptance criteria  -  all README badge requirements satisfied' {
 
     It 'badge exists, links correctly, is positioned in header, before Early Release Notice' {
         if ($null -eq $script:ReadmeContent) {

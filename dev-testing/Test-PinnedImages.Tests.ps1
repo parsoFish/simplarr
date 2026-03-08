@@ -24,7 +24,7 @@
 # =============================================================================
 
 # ---------------------------------------------------------------------------
-# Script-scope data — defined OUTSIDE BeforeAll so they are available
+# Script-scope data  -  defined OUTSIDE BeforeAll so they are available
 # during Pester's Discovery phase when Describe/Context/It blocks are built.
 # (Variables set inside BeforeAll are only available during Execution.)
 # ---------------------------------------------------------------------------
@@ -36,7 +36,7 @@ $script:ComposeFileNames = @(
     'docker-compose-pi.yml'
 )
 
-# Active (non-commented) services per compose file — image prefix keyed by service name
+# Active (non-commented) services per compose file  -  image prefix keyed by service name
 $script:UnifiedServices = [ordered]@{
     plex        = 'linuxserver/plex'
     qbittorrent = 'linuxserver/qbittorrent'
@@ -73,7 +73,7 @@ $script:AllImages = @(
     'qmcgaw/gluetun'
 )
 
-# Images that appear in multiple compose files — must carry the same tag everywhere
+# Images that appear in multiple compose files  -  must carry the same tag everywhere
 $script:SharedImageFiles = @(
     @{ Image = 'linuxserver/radarr';      Files = @('docker-compose-unified.yml', 'docker-compose-pi.yml') }
     @{ Image = 'linuxserver/sonarr';      Files = @('docker-compose-unified.yml', 'docker-compose-pi.yml') }
@@ -86,7 +86,7 @@ $script:SharedImageFiles = @(
 )
 
 # ---------------------------------------------------------------------------
-# Helper — asserts that all active image: lines for a given image prefix
+# Helper  -  asserts that all active image: lines for a given image prefix
 # carry a version-like tag (not :latest, not missing).
 # Must be defined at script scope so it is accessible in all test phases.
 # ---------------------------------------------------------------------------
@@ -98,8 +98,8 @@ function Assert-ImageIsPinned {
         [string]$ContextDescription
     )
     # A pinned tag satisfies at least one condition:
-    #   • Contains a numeric semver segment:  name:1.2  name:1.2.3  name:v1.2
-    #   • Is a SHA digest reference:          name@sha256:<hex>
+    #   - Contains a numeric semver segment:  name:1.2  name:1.2.3  name:v1.2
+    #   - Is a SHA digest reference:          name@sha256:<hex>
     # It must NOT be the floating alias :latest
 
     $imageLines = ($FileContent -split '\r?\n') |
@@ -123,7 +123,7 @@ function Assert-ImageIsPinned {
                     "(e.g. 1.2.3 or v3.39.1) or a sha256 digest"
                 )
         } elseif ($line -match '@sha256:') {
-            # Digest-pinned reference — always acceptable, no further checks needed
+            # Digest-pinned reference  -  always acceptable, no further checks needed
         } else {
             # Bare image name with no tag at all is also unacceptable
             $line | Should -Match ':\S+' `
@@ -133,7 +133,7 @@ function Assert-ImageIsPinned {
 }
 
 # ---------------------------------------------------------------------------
-# BeforeAll — runs once before any tests execute (Execution phase)
+# BeforeAll  -  runs once before any tests execute (Execution phase)
 # Loads file paths and caches file contents for all test blocks.
 # ---------------------------------------------------------------------------
 
@@ -165,10 +165,10 @@ BeforeAll {
 }
 
 # =============================================================================
-# Phase 1 — Compose files: zero :latest tags on active image lines
+# Phase 1  -  Compose files: zero :latest tags on active image lines
 # =============================================================================
 
-Describe 'Compose files — zero :latest tags on active image lines' {
+Describe 'Compose files  -  zero :latest tags on active image lines' {
 
     foreach ($fileName in $script:ComposeFileNames) {
         Context $fileName {
@@ -194,10 +194,10 @@ Describe 'Compose files — zero :latest tags on active image lines' {
 }
 
 # =============================================================================
-# Phase 2 — Compose files: each service has a version-pinned image tag
+# Phase 2  -  Compose files: each service has a version-pinned image tag
 # =============================================================================
 
-Describe 'Compose files — each service image has a pinned version tag' {
+Describe 'Compose files  -  each service image has a pinned version tag' {
 
     Context 'docker-compose-unified.yml' {
         foreach ($serviceName in $script:UnifiedServices.Keys) {
@@ -243,15 +243,15 @@ Describe 'Compose files — each service image has a pinned version tag' {
 }
 
 # =============================================================================
-# Phase 3 — Commented-out services: gluetun and qbittorrent VPN overrides
+# Phase 3  -  Commented-out services: gluetun and qbittorrent VPN overrides
 # =============================================================================
 
-Describe 'Compose files — commented-out services also have pinned tags' {
+Describe 'Compose files  -  commented-out services also have pinned tags' {
     # Gluetun and the qbittorrent VPN-override block are commented out for
     # optional use. They must still carry pinned tags so users can safely
     # uncomment them without accidentally pulling a floating :latest image.
 
-    Context 'docker-compose-unified.yml — commented gluetun' {
+    Context 'docker-compose-unified.yml  -  commented gluetun' {
         It 'should not contain qmcgaw/gluetun:latest in the commented-out section' {
             $content = $script:ComposeContent['docker-compose-unified.yml']
             $content | Should -Not -BeNullOrEmpty
@@ -299,7 +299,7 @@ Describe 'Compose files — commented-out services also have pinned tags' {
         }
     }
 
-    Context 'docker-compose-nas.yml — commented gluetun' {
+    Context 'docker-compose-nas.yml  -  commented gluetun' {
         It 'should not contain qmcgaw/gluetun:latest in the commented-out section' {
             $content = $script:ComposeContent['docker-compose-nas.yml']
             $content | Should -Not -BeNullOrEmpty
@@ -349,10 +349,10 @@ Describe 'Compose files — commented-out services also have pinned tags' {
 }
 
 # =============================================================================
-# Phase 4 — homepage/Dockerfile: pinned nginx-alpine base image
+# Phase 4  -  homepage/Dockerfile: pinned nginx-alpine base image
 # =============================================================================
 
-Describe 'homepage/Dockerfile — pinned nginx-alpine base image' {
+Describe 'homepage/Dockerfile  -  pinned nginx-alpine base image' {
 
     It 'should exist at homepage/Dockerfile' {
         $script:HomepageDockerfile | Should -Exist
@@ -371,7 +371,7 @@ Describe 'homepage/Dockerfile — pinned nginx-alpine base image' {
     It 'should not use bare FROM nginx:alpine (unversioned floating tag)' {
         $script:DockerfileContent | Should -Not -BeNullOrEmpty
 
-        # "nginx:alpine" without a numeric nginx version is a floating tag —
+        # "nginx:alpine" without a numeric nginx version is a floating tag  - 
         # it resolves to whatever the latest nginx-on-alpine happens to be.
         # Acceptable: nginx:1.25-alpine, nginx:1.27.4-alpine3.20
         # NOT acceptable: nginx:alpine  (no numeric version before -alpine)
@@ -405,10 +405,10 @@ Describe 'homepage/Dockerfile — pinned nginx-alpine base image' {
 }
 
 # =============================================================================
-# Phase 5 — VERSIONS.md: existence, structure, and completeness
+# Phase 5  -  VERSIONS.md: existence, structure, and completeness
 # =============================================================================
 
-Describe 'VERSIONS.md — file existence and non-empty content' {
+Describe 'VERSIONS.md  -  file existence and non-empty content' {
 
     It 'should exist at the repository root' {
         $script:VersionsMd | Should -Exist `
@@ -427,7 +427,7 @@ Describe 'VERSIONS.md — file existence and non-empty content' {
     }
 }
 
-Describe 'VERSIONS.md — all services are documented' {
+Describe 'VERSIONS.md  -  all services are documented' {
 
     foreach ($image in $script:AllImages) {
         It "should document $image" {
@@ -445,7 +445,7 @@ Describe 'VERSIONS.md — all services are documented' {
     }
 }
 
-Describe 'VERSIONS.md — each entry has required fields' {
+Describe 'VERSIONS.md  -  each entry has required fields' {
 
     It 'should include at least one numeric version tag (e.g. 1.2.3 or v3.39.1)' {
         if ($null -eq $script:VersionsMdContent) {
@@ -517,10 +517,10 @@ Describe 'VERSIONS.md — each entry has required fields' {
 }
 
 # =============================================================================
-# Phase 6 — Cross-file consistency: same image uses identical tag everywhere
+# Phase 6  -  Cross-file consistency: same image uses identical tag everywhere
 # =============================================================================
 
-Describe 'Compose files — same image must use the same tag across all files' {
+Describe 'Compose files  -  same image must use the same tag across all files' {
     # Prevents version drift: if radarr is 4.0.0 in unified but 3.9.0 in pi,
     # the split and unified deployments would run different software versions.
 
@@ -547,7 +547,7 @@ Describe 'Compose files — same image must use the same tag across all files' {
 
             if ($tags.Count -ge 2) {
                 $uniqueTags = $tags.Values | Sort-Object -Unique
-                $report = ($tags.GetEnumerator() | ForEach-Object { "  $($_.Key) → $($_.Value)" }) -join "`n"
+                $report = ($tags.GetEnumerator() | ForEach-Object { "  $($_.Key) -> $($_.Value)" }) -join "`n"
                 $uniqueTags.Count | Should -Be 1 `
                     -Because (
                         "$image must use the same pinned tag in all compose files to avoid " +
@@ -559,10 +559,10 @@ Describe 'Compose files — same image must use the same tag across all files' {
 }
 
 # =============================================================================
-# Phase 7 — Integration: docker compose config validates all three files
+# Phase 7  -  Integration: docker compose config validates all three files
 # =============================================================================
 
-Describe 'docker compose config — all three compose files parse without errors' {
+Describe 'docker compose config  -  all three compose files parse without errors' {
     # Runs `docker compose config --quiet` to validate YAML syntax and
     # environment-variable interpolation (equivalent to test.ps1 Phase 2).
     # Tests are skipped automatically when Docker is not available.
@@ -664,10 +664,10 @@ Describe 'docker compose config — all three compose files parse without errors
 }
 
 # =============================================================================
-# Phase 8 — Acceptance criteria aggregate (mirrors work-item definition of done)
+# Phase 8  -  Acceptance criteria aggregate (mirrors work-item definition of done)
 # =============================================================================
 
-Describe 'Acceptance criteria — all pinning requirements satisfied' {
+Describe 'Acceptance criteria  -  all pinning requirements satisfied' {
 
     It 'zero :latest tags across all three compose files combined (active lines only)' {
         $allLatestLines = @()
