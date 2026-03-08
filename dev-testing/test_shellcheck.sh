@@ -80,11 +80,11 @@ declare -a SCRIPTS=(
 # Header
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  ShellCheck Static Analysis Tests\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
 # ---------------------------------------------------------------------------
 # Test 1: shellcheck must be installed
@@ -94,7 +94,7 @@ section "Environment"
 
 if ! command -v shellcheck &>/dev/null; then
     fail "shellcheck is not installed"
-    printf "\n${RED}ERROR: shellcheck not found. Cannot run tests.${NC}\n"
+    printf '\n%s\n' "${RED}ERROR: shellcheck not found. Cannot run tests.${NC}"
     printf "Install with:\n"
     printf "  sudo apt install shellcheck   (Ubuntu/Debian)\n"
     printf "  brew install shellcheck       (macOS)\n\n"
@@ -117,7 +117,7 @@ if [[ "${SC_MAJOR}" -gt 0 ]] || { [[ "${SC_MAJOR}" -eq 0 ]] && [[ "${SC_MINOR}" 
     pass "shellcheck >= 0.9.0"
 else
     fail "shellcheck version ${SC_VERSION_RAW} is below the required 0.9.0"
-    printf "${YELLOW}  Upgrade shellcheck and re-run.${NC}\n"
+    printf '%s\n' "${YELLOW}  Upgrade shellcheck and re-run.${NC}"
     exit 1
 fi
 
@@ -138,7 +138,7 @@ done
 
 # Abort early if any file is missing — remaining tests are pointless
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
-    printf "\n${RED}Cannot continue: required script files are missing.${NC}\n\n"
+    printf '\n%s\n\n' "${RED}Cannot continue: required script files are missing.${NC}"
     exit 1
 fi
 
@@ -282,21 +282,21 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  Summary\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
-printf "  ${GREEN}Passed:${NC} %d\n" "${PASS_COUNT}"
-printf "  ${RED}Failed:${NC} %d\n" "${FAIL_COUNT}"
+printf '  %sPassed:%s %d\n' "${GREEN}" "${NC}" "${PASS_COUNT}"
+printf '  %sFailed:%s %d\n' "${RED}" "${NC}" "${FAIL_COUNT}"
 printf "\n"
 
 if [[ "${FAIL_COUNT}" -eq 0 ]]; then
-    printf "  ${GREEN}${BOLD}All tests passed. Scripts are ShellCheck clean.${NC}\n\n"
+    printf '%s\n\n' "  ${GREEN}${BOLD}All tests passed. Scripts are ShellCheck clean.${NC}"
     exit 0
 else
-    printf "  ${RED}${BOLD}Tests failed. Fix ShellCheck warnings before merging.${NC}\n\n"
+    printf '%s\n\n' "  ${RED}${BOLD}Tests failed. Fix ShellCheck warnings before merging.${NC}"
     printf "  Common fixes:\n"
     printf "    SC2162: Add -r flag to read:  read -r var\n"
     printf "    SC2155: Separate local and assignment:\n"

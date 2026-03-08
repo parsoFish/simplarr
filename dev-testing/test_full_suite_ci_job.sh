@@ -42,8 +42,6 @@ WORKFLOW_FILE="${PROJECT_ROOT}/.github/workflows/ci.yml"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
@@ -65,10 +63,6 @@ fail() {
     (( FAIL_COUNT++ )) || true
 }
 
-info() {
-    printf "  ${BLUE}[INFO]${NC} %s\n" "$1"
-}
-
 section() {
     printf "\n${BOLD}${CYAN}%s${NC}\n" "$1"
     printf "${CYAN}%s${NC}\n" "────────────────────────────────────────────────────────────"
@@ -88,11 +82,11 @@ workflow_count() {
 # Header
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  Full-Suite CI Job Structural Tests\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
 # ---------------------------------------------------------------------------
 # Section 1: Precondition — ci.yml must exist
@@ -104,8 +98,8 @@ if [[ -f "${WORKFLOW_FILE}" ]]; then
     pass ".github/workflows/ci.yml exists"
 else
     fail ".github/workflows/ci.yml does not exist"
-    printf "\n${RED}Cannot continue: workflow file is missing.${NC}\n\n"
-    printf "  ${PASS_COUNT} passed, ${FAIL_COUNT} failed\n\n"
+    printf '\n%s\n\n' "${RED}Cannot continue: workflow file is missing.${NC}"
+    printf '  %d passed, %d failed\n\n' "${PASS_COUNT}" "${FAIL_COUNT}"
     exit 1
 fi
 
@@ -331,36 +325,36 @@ CRITERIA_FAILURES=0
 
 # full-suite runs dev-testing/test.sh
 if ! workflow_contains "dev-testing/test\.sh"; then
-    printf "  ${RED}[MISSING]${NC} dev-testing/test.sh invocation in full-suite\n"
+    printf '  %s[MISSING]%s dev-testing/test.sh invocation in full-suite\n' "${RED}" "${NC}"
     (( CRITERIA_FAILURES++ )) || true
 fi
 
 # parallel PowerShell job runs dev-testing/test.ps1
 if ! workflow_contains "dev-testing/test\.ps1"; then
-    printf "  ${RED}[MISSING]${NC} dev-testing/test.ps1 invocation in parallel job\n"
+    printf '  %s[MISSING]%s dev-testing/test.ps1 invocation in parallel job\n' "${RED}" "${NC}"
     (( CRITERIA_FAILURES++ )) || true
 fi
 
 # both jobs depend on fast-gate
 if [[ "$(workflow_count "needs:.*fast-gate")" -lt 2 ]]; then
-    printf "  ${RED}[MISSING]${NC} both suite jobs must declare 'needs: fast-gate'\n"
+    printf '  %s[MISSING]%s both suite jobs must declare '"'"'needs: fast-gate'"'"'\n' "${RED}" "${NC}"
     (( CRITERIA_FAILURES++ )) || true
 fi
 
 # artifact upload on failure
 if ! workflow_contains "actions/upload-artifact"; then
-    printf "  ${RED}[MISSING]${NC} actions/upload-artifact step\n"
+    printf '  %s[MISSING]%s actions/upload-artifact step\n' "${RED}" "${NC}"
     (( CRITERIA_FAILURES++ )) || true
 fi
 
 if ! workflow_contains "if:\s*failure\(\)|if: \\\$\{\{ failure\(\) \}\}"; then
-    printf "  ${RED}[MISSING]${NC} 'if: failure()' condition on artifact upload\n"
+    printf '  %s[MISSING]%s '"'"'if: failure()'"'"' condition on artifact upload\n' "${RED}" "${NC}"
     (( CRITERIA_FAILURES++ )) || true
 fi
 
 # pwsh for test.ps1
 if ! workflow_contains "shell:\s*pwsh|pwsh.*test\.ps1"; then
-    printf "  ${RED}[MISSING]${NC} pwsh invocation for dev-testing/test.ps1\n"
+    printf '  %s[MISSING]%s pwsh invocation for dev-testing/test.ps1\n' "${RED}" "${NC}"
     (( CRITERIA_FAILURES++ )) || true
 fi
 
@@ -374,20 +368,20 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  Summary\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
-printf "  ${GREEN}Passed:${NC} %d\n" "${PASS_COUNT}"
-printf "  ${RED}Failed:${NC} %d\n" "${FAIL_COUNT}"
+printf '  %sPassed:%s %d\n' "${GREEN}" "${NC}" "${PASS_COUNT}"
+printf '  %sFailed:%s %d\n' "${RED}" "${NC}" "${FAIL_COUNT}"
 printf "\n"
 
 if [[ "${FAIL_COUNT}" -eq 0 ]]; then
-    printf "  ${GREEN}${BOLD}All full-suite CI job tests passed.${NC}\n\n"
+    printf '%s\n\n' "  ${GREEN}${BOLD}All full-suite CI job tests passed.${NC}"
     exit 0
 else
-    printf "  ${RED}${BOLD}Full-suite CI job tests failed. Update ci.yml to wire in test.sh and add the PowerShell suite job.${NC}\n\n"
+    printf '%s\n\n' "  ${RED}${BOLD}Full-suite CI job tests failed. Update ci.yml to wire in test.sh and add the PowerShell suite job.${NC}"
     exit 1
 fi

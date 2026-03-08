@@ -46,7 +46,6 @@ EARLY_RELEASE_PATTERN="Early Release Notice"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
@@ -92,11 +91,11 @@ readme_line_of() {
 # Header
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  README CI Badge and Development Section Tests\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
 # ---------------------------------------------------------------------------
 # Section 1: README exists
@@ -108,8 +107,8 @@ if [[ -f "${README_FILE}" ]]; then
     pass "readme.md exists at project root"
 else
     fail "readme.md does not exist"
-    printf "\n${RED}Cannot continue: README file is missing.${NC}\n\n"
-    printf "  ${PASS_COUNT} passed, ${FAIL_COUNT} failed\n\n"
+    printf '\n%s\n\n' "${RED}Cannot continue: README file is missing.${NC}"
+    printf '  %d passed, %d failed\n\n' "${PASS_COUNT}" "${FAIL_COUNT}"
     exit 1
 fi
 
@@ -214,20 +213,20 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  Summary\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
-printf "  ${GREEN}Passed:${NC} %d\n" "${PASS_COUNT}"
-printf "  ${RED}Failed:${NC} %d\n" "${FAIL_COUNT}"
+printf '  %sPassed:%s %d\n' "${GREEN}" "${NC}" "${PASS_COUNT}"
+printf '  %sFailed:%s %d\n' "${RED}" "${NC}" "${FAIL_COUNT}"
 printf "\n"
 
 if [[ "${FAIL_COUNT}" -eq 0 ]]; then
-    printf "  ${GREEN}${BOLD}All README badge tests passed.${NC}\n\n"
+    printf '%s\n\n' "  ${GREEN}${BOLD}All README badge tests passed.${NC}"
     exit 0
 else
-    printf "  ${RED}${BOLD}README badge tests failed. Update readme.md with the required badge and Development section.${NC}\n\n"
+    printf '%s\n\n' "  ${RED}${BOLD}README badge tests failed. Update readme.md with the required badge and Development section.${NC}"
     exit 1
 fi
