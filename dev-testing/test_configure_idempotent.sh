@@ -654,7 +654,7 @@ COMPOSE_EOF
                     "http://localhost:${PORT_RADARR}/api/v3/downloadclient" \
                     2>/dev/null || echo "[]")
                 _RADARR_QB_COUNT=$(echo "${_RADARR_DL}" | \
-                    grep -o '"name":"qBittorrent"' | wc -l | tr -d ' ')
+                    grep -o '"name": "qBittorrent"' | wc -l | tr -d ' ')
                 if [[ "${_RADARR_QB_COUNT}" -eq 1 ]]; then
                     pass "Radarr — exactly 1 qBittorrent download client (no duplicates)"
                 elif [[ "${_RADARR_QB_COUNT}" -eq 0 ]]; then
@@ -669,7 +669,7 @@ COMPOSE_EOF
                     "http://localhost:${PORT_SONARR}/api/v3/downloadclient" \
                     2>/dev/null || echo "[]")
                 _SONARR_QB_COUNT=$(echo "${_SONARR_DL}" | \
-                    grep -o '"name":"qBittorrent"' | wc -l | tr -d ' ')
+                    grep -o '"name": "qBittorrent"' | wc -l | tr -d ' ')
                 if [[ "${_SONARR_QB_COUNT}" -eq 1 ]]; then
                     pass "Sonarr — exactly 1 qBittorrent download client (no duplicates)"
                 elif [[ "${_SONARR_QB_COUNT}" -eq 0 ]]; then
@@ -684,7 +684,7 @@ COMPOSE_EOF
                     "http://localhost:${PORT_RADARR}/api/v3/rootfolder" \
                     2>/dev/null || echo "[]")
                 _RADARR_MOVIES_COUNT=$(echo "${_RADARR_RF}" | \
-                    grep -o '"path":"/movies"' | wc -l | tr -d ' ')
+                    grep -o '"path": "/movies"' | wc -l | tr -d ' ')
                 if [[ "${_RADARR_MOVIES_COUNT}" -eq 1 ]]; then
                     pass "Radarr — exactly 1 /movies root folder (no duplicates)"
                 elif [[ "${_RADARR_MOVIES_COUNT}" -eq 0 ]]; then
@@ -699,7 +699,7 @@ COMPOSE_EOF
                     "http://localhost:${PORT_SONARR}/api/v3/rootfolder" \
                     2>/dev/null || echo "[]")
                 _SONARR_TV_COUNT=$(echo "${_SONARR_RF}" | \
-                    grep -o '"path":"/tv"' | wc -l | tr -d ' ')
+                    grep -o '"path": "/tv"' | wc -l | tr -d ' ')
                 if [[ "${_SONARR_TV_COUNT}" -eq 1 ]]; then
                     pass "Sonarr — exactly 1 /tv root folder (no duplicates)"
                 elif [[ "${_SONARR_TV_COUNT}" -eq 0 ]]; then
@@ -714,7 +714,7 @@ COMPOSE_EOF
                     "http://localhost:${PORT_PROWLARR}/api/v1/applications" \
                     2>/dev/null || echo "[]")
                 _PROWLARR_RADARR_COUNT=$(echo "${_PROWLARR_APPS}" | \
-                    grep -o '"name":"Radarr"' | wc -l | tr -d ' ')
+                    grep -o '"name": "Radarr"' | wc -l | tr -d ' ')
                 if [[ "${_PROWLARR_RADARR_COUNT}" -eq 1 ]]; then
                     pass "Prowlarr — exactly 1 Radarr application (no duplicates)"
                 elif [[ "${_PROWLARR_RADARR_COUNT}" -eq 0 ]]; then
@@ -724,7 +724,7 @@ COMPOSE_EOF
                 fi
 
                 _PROWLARR_SONARR_COUNT=$(echo "${_PROWLARR_APPS}" | \
-                    grep -o '"name":"Sonarr"' | wc -l | tr -d ' ')
+                    grep -o '"name": "Sonarr"' | wc -l | tr -d ' ')
                 if [[ "${_PROWLARR_SONARR_COUNT}" -eq 1 ]]; then
                     pass "Prowlarr — exactly 1 Sonarr application (no duplicates)"
                 elif [[ "${_PROWLARR_SONARR_COUNT}" -eq 0 ]]; then
