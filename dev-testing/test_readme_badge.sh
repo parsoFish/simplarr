@@ -46,7 +46,6 @@ EARLY_RELEASE_PATTERN="Early Release Notice"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
@@ -60,22 +59,22 @@ FAIL_COUNT=0
 # ---------------------------------------------------------------------------
 
 pass() {
-    printf "  ${GREEN}[PASS]${NC} %s\n" "$1"
+    printf '  %s[PASS]%s %s\n' "${GREEN}" "${NC}" "$1"
     (( PASS_COUNT++ )) || true
 }
 
 fail() {
-    printf "  ${RED}[FAIL]${NC} %s\n" "$1"
+    printf '  %s[FAIL]%s %s\n' "${RED}" "${NC}" "$1"
     (( FAIL_COUNT++ )) || true
 }
 
 info() {
-    printf "  ${BLUE}[INFO]${NC} %s\n" "$1"
+    printf '  %s[INFO]%s %s\n' "${BLUE}" "${NC}" "$1"
 }
 
 section() {
-    printf "\n${BOLD}${CYAN}%s${NC}\n" "$1"
-    printf "${CYAN}%s${NC}\n" "────────────────────────────────────────────────────────────"
+    printf '\n%s%s%s%s\n' "${BOLD}" "${CYAN}" "$1" "${NC}"
+    printf '%s%s%s\n' "${CYAN}" "────────────────────────────────────────────────────────────" "${NC}"
 }
 
 # Returns 0 if pattern is found in README
@@ -92,11 +91,11 @@ readme_line_of() {
 # Header
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  README CI Badge and Development Section Tests\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
 # ---------------------------------------------------------------------------
 # Section 1: README exists
@@ -108,8 +107,8 @@ if [[ -f "${README_FILE}" ]]; then
     pass "readme.md exists at project root"
 else
     fail "readme.md does not exist"
-    printf "\n${RED}Cannot continue: README file is missing.${NC}\n\n"
-    printf "  ${PASS_COUNT} passed, ${FAIL_COUNT} failed\n\n"
+    printf '\n%sCannot continue: README file is missing.%s\n\n' "${RED}" "${NC}"
+    printf "  %d passed, %d failed\n\n" "${PASS_COUNT}" "${FAIL_COUNT}"
     exit 1
 fi
 
@@ -214,20 +213,20 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  Summary\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
-printf "  ${GREEN}Passed:${NC} %d\n" "${PASS_COUNT}"
-printf "  ${RED}Failed:${NC} %d\n" "${FAIL_COUNT}"
+printf '  %sPassed:%s %d\n' "${GREEN}" "${NC}" "${PASS_COUNT}"
+printf '  %sFailed:%s %d\n' "${RED}" "${NC}" "${FAIL_COUNT}"
 printf "\n"
 
 if [[ "${FAIL_COUNT}" -eq 0 ]]; then
-    printf "  ${GREEN}${BOLD}All README badge tests passed.${NC}\n\n"
+    printf '  %s%sAll README badge tests passed.%s\n\n' "${GREEN}" "${BOLD}" "${NC}"
     exit 0
 else
-    printf "  ${RED}${BOLD}README badge tests failed. Update readme.md with the required badge and Development section.${NC}\n\n"
+    printf '  %s%sREADME badge tests failed. Update readme.md with the required badge and Development section.%s\n\n' "${RED}" "${BOLD}" "${NC}"
     exit 1
 fi

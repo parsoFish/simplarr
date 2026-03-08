@@ -47,22 +47,22 @@ FAIL_COUNT=0
 # ---------------------------------------------------------------------------
 
 pass() {
-    printf "  ${GREEN}[PASS]${NC} %s\n" "$1"
+    printf '  %s[PASS]%s %s\n' "${GREEN}" "${NC}" "$1"
     (( PASS_COUNT++ )) || true
 }
 
 fail() {
-    printf "  ${RED}[FAIL]${NC} %s\n" "$1"
+    printf '  %s[FAIL]%s %s\n' "${RED}" "${NC}" "$1"
     (( FAIL_COUNT++ )) || true
 }
 
 info() {
-    printf "  ${BLUE}[INFO]${NC} %s\n" "$1"
+    printf '  %s[INFO]%s %s\n' "${BLUE}" "${NC}" "$1"
 }
 
 section() {
-    printf "\n${BOLD}${CYAN}%s${NC}\n" "$1"
-    printf "${CYAN}%s${NC}\n" "────────────────────────────────────────────────────────────"
+    printf '\n%s%s%s%s\n' "${BOLD}" "${CYAN}" "$1" "${NC}"
+    printf '%s%s%s\n' "${CYAN}" "────────────────────────────────────────────────────────────" "${NC}"
 }
 
 # ---------------------------------------------------------------------------
@@ -80,11 +80,11 @@ declare -a SCRIPTS=(
 # Header
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  ShellCheck Static Analysis Tests\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
 # ---------------------------------------------------------------------------
 # Test 1: shellcheck must be installed
@@ -94,7 +94,7 @@ section "Environment"
 
 if ! command -v shellcheck &>/dev/null; then
     fail "shellcheck is not installed"
-    printf "\n${RED}ERROR: shellcheck not found. Cannot run tests.${NC}\n"
+    printf '\n%sERROR: shellcheck not found. Cannot run tests.%s\n' "${RED}" "${NC}"
     printf "Install with:\n"
     printf "  sudo apt install shellcheck   (Ubuntu/Debian)\n"
     printf "  brew install shellcheck       (macOS)\n\n"
@@ -117,7 +117,7 @@ if [[ "${SC_MAJOR}" -gt 0 ]] || { [[ "${SC_MAJOR}" -eq 0 ]] && [[ "${SC_MINOR}" 
     pass "shellcheck >= 0.9.0"
 else
     fail "shellcheck version ${SC_VERSION_RAW} is below the required 0.9.0"
-    printf "${YELLOW}  Upgrade shellcheck and re-run.${NC}\n"
+    printf '%s  Upgrade shellcheck and re-run.%s\n' "${YELLOW}" "${NC}"
     exit 1
 fi
 
@@ -138,7 +138,7 @@ done
 
 # Abort early if any file is missing — remaining tests are pointless
 if [[ "${FAIL_COUNT}" -gt 0 ]]; then
-    printf "\n${RED}Cannot continue: required script files are missing.${NC}\n\n"
+    printf '\n%sCannot continue: required script files are missing.%s\n\n' "${RED}" "${NC}"
     exit 1
 fi
 
@@ -227,7 +227,7 @@ for script in "${SCRIPTS[@]}"; do
     while IFS= read -r line_info; do
         lineno=$(echo "${line_info}" | cut -d: -f1)
         content=$(echo "${line_info}" | cut -d: -f2-)
-        printf "  ${YELLOW}[WARN]${NC} Undocumented disable at %s:%s\n" "${rel_path}" "${lineno}"
+        printf '  %s[WARN]%s Undocumented disable at %s:%s\n' "${YELLOW}" "${NC}" "${rel_path}" "${lineno}"
         printf "         %s\n" "${content}"
         printf "         Add a comment after the directive explaining why it is suppressed.\n"
         BARE_DISABLE_FOUND=true
@@ -282,21 +282,21 @@ fi
 # Summary
 # ---------------------------------------------------------------------------
 
-printf "\n${BOLD}${CYAN}"
+printf '\n%s%s' "${BOLD}" "${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
 printf "  Summary\n"
 printf "════════════════════════════════════════════════════════════\n"
-printf "${NC}\n"
+printf '%s\n' "${NC}"
 
-printf "  ${GREEN}Passed:${NC} %d\n" "${PASS_COUNT}"
-printf "  ${RED}Failed:${NC} %d\n" "${FAIL_COUNT}"
+printf '  %sPassed:%s %d\n' "${GREEN}" "${NC}" "${PASS_COUNT}"
+printf '  %sFailed:%s %d\n' "${RED}" "${NC}" "${FAIL_COUNT}"
 printf "\n"
 
 if [[ "${FAIL_COUNT}" -eq 0 ]]; then
-    printf "  ${GREEN}${BOLD}All tests passed. Scripts are ShellCheck clean.${NC}\n\n"
+    printf '  %s%sAll tests passed. Scripts are ShellCheck clean.%s\n\n' "${GREEN}" "${BOLD}" "${NC}"
     exit 0
 else
-    printf "  ${RED}${BOLD}Tests failed. Fix ShellCheck warnings before merging.${NC}\n\n"
+    printf '  %s%sTests failed. Fix ShellCheck warnings before merging.%s\n\n' "${RED}" "${BOLD}" "${NC}"
     printf "  Common fixes:\n"
     printf "    SC2162: Add -r flag to read:  read -r var\n"
     printf "    SC2155: Separate local and assignment:\n"

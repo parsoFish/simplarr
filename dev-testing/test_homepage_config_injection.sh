@@ -649,6 +649,7 @@ if [[ "${FAIL_COUNT}" -eq 0 ]]; then
 else
     printf '  %s%sTests failed. Implement config.json injection before merging.%s\n\n' "${RED}" "${BOLD}" "${NC}"
     printf '  Implementation checklist:\n'
+    # shellcheck disable=SC2016  # reason: literal ${SERVICE_PORT} shown as example syntax, not a variable to expand
     printf '    1. Create homepage/config.json.template with ${SERVICE_PORT} placeholders\n'
     printf '    2. Create homepage/entrypoint.sh that runs envsubst then exec nginx\n'
     printf '    3. Update homepage/Dockerfile to COPY and use the entrypoint script\n'
