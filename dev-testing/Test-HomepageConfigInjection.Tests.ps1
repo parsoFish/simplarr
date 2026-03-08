@@ -250,7 +250,7 @@ Describe 'homepage/js/dashboard.js  -  fetches /config.json' {
 Describe 'homepage/js/dashboard.js  -  fallback defaults match canonical ports' {
 
     foreach ($entry in $script:ServicePorts.GetEnumerator()) {
-        $service = $entry.Key -replace '_PORT', '' -ToLower
+        $service = ($entry.Key -replace '_PORT', '').ToLower()
         $port    = $entry.Value
         It "should contain fallback port $port for $service" {
             if ($null -eq $script:DashboardContent) {
@@ -329,7 +329,7 @@ Describe 'homepage/js/status.js  -  fetches /config.json' {
 Describe 'homepage/js/status.js  -  fallback defaults match canonical ports' {
 
     foreach ($entry in $script:ServicePorts.GetEnumerator()) {
-        $service = $entry.Key -replace '_PORT', '' -ToLower
+        $service = ($entry.Key -replace '_PORT', '').ToLower()
         $port    = $entry.Value
         It "should contain fallback port $port for $service" {
             if ($null -eq $script:StatusContent) {
