@@ -96,6 +96,72 @@ function Write-ErrorMessage {
     Write-Host $Message
 }
 
+function Invoke-ConfigApi {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Uri,
+        [string]$Method = 'Get',
+        [hashtable]$Headers = @{},
+        [string]$Body,
+        [string]$ContentType = 'application/json'
+    )
+
+    try {
+        $restParams = @{
+            Uri         = $Uri
+            Method      = $Method
+            Headers     = $Headers
+            ErrorAction = 'Stop'
+        }
+        if (-not [string]::IsNullOrEmpty($Body)) {
+            $restParams['Body']        = $Body
+            $restParams['ContentType'] = $ContentType
+        }
+
+        $response = Invoke-RestMethod @restParams
+
+        return [PSCustomObject]@{
+            Success       = $true
+            StatusCode    = 200
+            Body          = $response
+            AlreadyExists = $false
+        }
+    }
+    catch {
+        # Extract HTTP status code from exception
+        $statusCode = 0
+        if ($null -ne $_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+        elseif ($_.Exception.Message -match 'HTTP (\d+)') {
+            $statusCode = [int]$Matches[1]
+        }
+
+        # Extract response body from ErrorDetails (set by Invoke-RestMethod on non-2xx)
+        $responseBody = if ($_.ErrorDetails.Message) { $_.ErrorDetails.Message } else { $_.Exception.Message }
+
+        # 409 Conflict - resource already exists (benign idempotency outcome)
+        if ($statusCode -eq 409) {
+            Write-Info "Resource already exists (HTTP 409)"
+            return [PSCustomObject]@{
+                Success       = $true
+                StatusCode    = 409
+                Body          = $responseBody
+                AlreadyExists = $true
+            }
+        }
+
+        # All other errors - hard failure; surface status code and body in warning
+        Write-WarningMessage "API call failed (HTTP $statusCode): $responseBody"
+        return [PSCustomObject]@{
+            Success       = $false
+            StatusCode    = $statusCode
+            Body          = $responseBody
+            AlreadyExists = $false
+        }
+    }
+}
+
 function Wait-ForService {
     param(
         [string]$Name,
