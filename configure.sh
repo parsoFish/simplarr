@@ -148,14 +148,27 @@ get_qbittorrent_password() {
 # Service Configuration Functions
 # =============================================================================
 
-# Add qBittorrent as download client to Radarr
-add_qbittorrent_to_radarr() {
-    local api_key=$1
-
-    log_info "Adding qBittorrent to Radarr..."
+# Add qBittorrent as download client to a *arr service.
+# Parameters:
+#   $1 service_url           — base URL of the target service (e.g. http://localhost:7878)
+#   $2 api_key               — X-Api-Key for the target service
+#   $3 category_field        — JSON field name for the category (e.g. movieCategory, tvCategory)
+#   $4 category_value        — value for the category field (e.g. radarr, sonarr)
+#   $5 recent_priority_field — JSON field name for recent download priority
+#   $6 older_priority_field  — JSON field name for older download priority
+add_qbittorrent_download_client() {
+    local service_url="$1"
+    local api_key="$2"
+    local category_field="$3"
+    local category_value="$4"
+    local recent_priority_field="$5"
+    local older_priority_field="$6"
+    # Derive the imported-category field name by inserting "Imported" before "Category"
+    # e.g. movieCategory → movieImportedCategory, tvCategory → tvImportedCategory
+    local imported_category_field="${category_field/Category/ImportedCategory}"
 
     local response
-    response=$(curl -s -X POST "${RADARR_URL}/api/v3/downloadclient" \
+    response=$(curl -s -X POST "${service_url}/api/v3/downloadclient" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d "{
@@ -172,10 +185,10 @@ add_qbittorrent_to_radarr() {
                 {\"name\": \"urlBase\", \"value\": \"\"},
                 {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
                 {\"name\": \"password\", \"value\": \"${QB_PASSWORD}\"},
-                {\"name\": \"movieCategory\", \"value\": \"radarr\"},
-                {\"name\": \"movieImportedCategory\", \"value\": \"\"},
-                {\"name\": \"recentMoviePriority\", \"value\": 0},
-                {\"name\": \"olderMoviePriority\", \"value\": 0},
+                {\"name\": \"${category_field}\", \"value\": \"${category_value}\"},
+                {\"name\": \"${imported_category_field}\", \"value\": \"\"},
+                {\"name\": \"${recent_priority_field}\", \"value\": 0},
+                {\"name\": \"${older_priority_field}\", \"value\": 0},
                 {\"name\": \"initialState\", \"value\": 0},
                 {\"name\": \"sequentialOrder\", \"value\": false},
                 {\"name\": \"firstAndLast\", \"value\": false}
@@ -187,59 +200,32 @@ add_qbittorrent_to_radarr() {
         }")
 
     if echo "$response" | grep -q '"id"'; then
-        log_success "qBittorrent added to Radarr"
+        log_success "qBittorrent added to service"
         return 0
     else
-        log_warn "qBittorrent may already exist in Radarr or failed to add"
+        log_warn "qBittorrent may already exist or failed to add"
         return 1
     fi
 }
 
+# Add qBittorrent as download client to Radarr
+add_qbittorrent_to_radarr() {
+    local api_key="$1"
+    log_info "Adding qBittorrent to Radarr..."
+    add_qbittorrent_download_client \
+        "${RADARR_URL}" "${api_key}" \
+        "movieCategory" "radarr" \
+        "recentMoviePriority" "olderMoviePriority"
+}
+
 # Add qBittorrent as download client to Sonarr
 add_qbittorrent_to_sonarr() {
-    local api_key=$1
-
+    local api_key="$1"
     log_info "Adding qBittorrent to Sonarr..."
-
-    local response
-    response=$(curl -s -X POST "${SONARR_URL}/api/v3/downloadclient" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"enable\": true,
-            \"protocol\": \"torrent\",
-            \"priority\": 1,
-            \"removeCompletedDownloads\": true,
-            \"removeFailedDownloads\": true,
-            \"name\": \"qBittorrent\",
-            \"fields\": [
-                {\"name\": \"host\", \"value\": \"${QBITTORRENT_HOST}\"},
-                {\"name\": \"port\", \"value\": 8080},
-                {\"name\": \"useSsl\", \"value\": false},
-                {\"name\": \"urlBase\", \"value\": \"\"},
-                {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
-                {\"name\": \"password\", \"value\": \"${QB_PASSWORD}\"},
-                {\"name\": \"tvCategory\", \"value\": \"sonarr\"},
-                {\"name\": \"tvImportedCategory\", \"value\": \"\"},
-                {\"name\": \"recentTvPriority\", \"value\": 0},
-                {\"name\": \"olderTvPriority\", \"value\": 0},
-                {\"name\": \"initialState\", \"value\": 0},
-                {\"name\": \"sequentialOrder\", \"value\": false},
-                {\"name\": \"firstAndLast\", \"value\": false}
-            ],
-            \"implementationName\": \"qBittorrent\",
-            \"implementation\": \"QBittorrent\",
-            \"configContract\": \"QBittorrentSettings\",
-            \"tags\": []
-        }")
-
-    if echo "$response" | grep -q '"id"'; then
-        log_success "qBittorrent added to Sonarr"
-        return 0
-    else
-        log_warn "qBittorrent may already exist in Sonarr or failed to add"
-        return 1
-    fi
+    add_qbittorrent_download_client \
+        "${SONARR_URL}" "${api_key}" \
+        "tvCategory" "sonarr" \
+        "recentTvPriority" "olderTvPriority"
 }
 
 # Add Radarr to Prowlarr for indexer sync
@@ -358,139 +344,89 @@ add_sonarr_root_folder() {
     fi
 }
 
+# Add a single public indexer to Prowlarr.
+# Parameters:
+#   $1 api_key         — Prowlarr X-Api-Key
+#   $2 name            — display name shown in Prowlarr UI
+#   $3 base_url        — base URL for the indexer site
+#   $4 definition_name — Prowlarr's internal definitionName (Cardigann schema ID)
+#   $5 impl_name       — implementationName reported to Prowlarr (defaults to $2 if omitted)
+add_indexer() {
+    local api_key="$1"
+    local name="$2"
+    local base_url="$3"
+    local definition_name="$4"
+    local impl_name="${5:-${name}}"
+
+    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+        -H "X-Api-Key: ${api_key}" \
+        -H "Content-Type: application/json" \
+        -d "{
+            \"enable\": true,
+            \"redirect\": false,
+            \"name\": \"${name}\",
+            \"fields\": [
+                {\"name\": \"baseUrl\", \"value\": \"${base_url}\"},
+                {\"name\": \"baseSettings.limitsUnit\", \"value\": 0}
+            ],
+            \"implementationName\": \"${impl_name}\",
+            \"implementation\": \"Cardigann\",
+            \"configContract\": \"CardigannSettings\",
+            \"definitionName\": \"${definition_name}\",
+            \"tags\": [],
+            \"priority\": 25,
+            \"appProfileId\": 1
+        }" >/dev/null 2>&1; then
+        log_success "Added ${name}"
+    else
+        log_warn "${name} may already exist"
+    fi
+}
+
 # Add popular public indexers to Prowlarr
-# NOTE: Some indexers (1337x, EZTV) may be blocked in certain countries (e.g., Australia)
-#       or have Cloudflare protection. Add them manually in Prowlarr if needed.
+# NOTE: Some indexers may be blocked in certain countries or have Cloudflare
+#       protection. Add them manually in Prowlarr if needed.
 add_public_indexers() {
-    local api_key=$1
+    local api_key="$1"
 
     log_info "Adding public indexers to Prowlarr..."
     log_info "Note: Some indexers may fail due to geo-blocking or Cloudflare protection"
 
-    # YTS
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "redirect": false,
-            "name": "YTS",
-            "fields": [
-                {"name": "baseUrl", "value": "https://yts.mx"},
-                {"name": "baseSettings.limitsUnit", "value": 0}
-            ],
-            "implementationName": "YTS",
-            "implementation": "Cardigann",
-            "configContract": "CardigannSettings",
-            "definitionName": "yts",
-            "tags": [],
-            "priority": 25,
-            "appProfileId": 1
-        }' >/dev/null 2>&1; then
-        log_success "Added YTS"
-    else
-        log_warn "YTS may already exist"
-    fi
+    # Parallel arrays — each index represents one indexer.
+    # impl_name differs from name only for Nyaa (Prowlarr uses "Nyaa.si" internally).
+    local -a names=(
+        "YTS"
+        "The Pirate Bay"
+        "TorrentGalaxy"
+        "Nyaa"
+        "LimeTorrents"
+    )
+    local -a base_urls=(
+        "https://yts.mx"
+        "https://thepiratebay.org"
+        "https://torrentgalaxy.to"
+        "https://nyaa.si"
+        "https://www.limetorrents.lol"
+    )
+    local -a def_names=(
+        "yts"
+        "thepiratebay"
+        "torrentgalaxy"
+        "nyaasi"
+        "limetorrents"
+    )
+    local -a impl_names=(
+        "YTS"
+        "The Pirate Bay"
+        "TorrentGalaxy"
+        "Nyaa.si"
+        "LimeTorrents"
+    )
 
-    # The Pirate Bay
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "redirect": false,
-            "name": "The Pirate Bay",
-            "fields": [
-                {"name": "baseUrl", "value": "https://thepiratebay.org"},
-                {"name": "baseSettings.limitsUnit", "value": 0}
-            ],
-            "implementationName": "The Pirate Bay",
-            "implementation": "Cardigann",
-            "configContract": "CardigannSettings",
-            "definitionName": "thepiratebay",
-            "tags": [],
-            "priority": 25,
-            "appProfileId": 1
-        }' >/dev/null 2>&1; then
-        log_success "Added The Pirate Bay"
-    else
-        log_warn "TPB may already exist"
-    fi
-
-    # TorrentGalaxy
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "redirect": false,
-            "name": "TorrentGalaxy",
-            "fields": [
-                {"name": "baseUrl", "value": "https://torrentgalaxy.to"},
-                {"name": "baseSettings.limitsUnit", "value": 0}
-            ],
-            "implementationName": "TorrentGalaxy",
-            "implementation": "Cardigann",
-            "configContract": "CardigannSettings",
-            "definitionName": "torrentgalaxy",
-            "tags": [],
-            "priority": 25,
-            "appProfileId": 1
-        }' >/dev/null 2>&1; then
-        log_success "Added TorrentGalaxy"
-    else
-        log_warn "TorrentGalaxy may already exist"
-    fi
-
-    # Nyaa (anime)
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "redirect": false,
-            "name": "Nyaa",
-            "fields": [
-                {"name": "baseUrl", "value": "https://nyaa.si"},
-                {"name": "baseSettings.limitsUnit", "value": 0}
-            ],
-            "implementationName": "Nyaa.si",
-            "implementation": "Cardigann",
-            "configContract": "CardigannSettings",
-            "definitionName": "nyaasi",
-            "tags": [],
-            "priority": 25,
-            "appProfileId": 1
-        }' >/dev/null 2>&1; then
-        log_success "Added Nyaa.si"
-    else
-        log_warn "Nyaa may already exist"
-    fi
-
-    # LimeTorrents
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d '{
-            "enable": true,
-            "redirect": false,
-            "name": "LimeTorrents",
-            "fields": [
-                {"name": "baseUrl", "value": "https://www.limetorrents.lol"},
-                {"name": "baseSettings.limitsUnit", "value": 0}
-            ],
-            "implementationName": "LimeTorrents",
-            "implementation": "Cardigann",
-            "configContract": "CardigannSettings",
-            "definitionName": "limetorrents",
-            "tags": [],
-            "priority": 25,
-            "appProfileId": 1
-        }' >/dev/null 2>&1; then
-        log_success "Added LimeTorrents"
-    else
-        log_warn "LimeTorrents may already exist"
-    fi
+    local i
+    for i in "${!names[@]}"; do
+        add_indexer "${api_key}" "${names[$i]}" "${base_urls[$i]}" "${def_names[$i]}" "${impl_names[$i]}"
+    done
 }
 
 # Trigger Prowlarr to sync indexers to apps
