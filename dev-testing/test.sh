@@ -217,6 +217,21 @@ for rel_path in "${REQUIRED_FILES[@]}"; do
     fi
 done
 
+# -- 2b: Split-setup — NFS host path presence in docker-compose-pi.yml ------
+
+printf "\n"
+info "Split-setup validation — NFS host-side volume sources in docker-compose-pi.yml"
+printf "\n"
+
+for _nfs_path in "/mnt/nas/downloads" "/mnt/nas/movies" "/mnt/nas/tv"; do
+    if grep -qE "^[[:space:]]+-[[:space:]]+${_nfs_path}:" "${PROJECT_ROOT}/docker-compose-pi.yml"; then
+        pass "docker-compose-pi.yml — NFS host-side volume source ${_nfs_path} declared"
+    else
+        # fail() — path absent from docker-compose-pi.yml; volume binding is broken
+        fail "docker-compose-pi.yml — missing NFS host-side volume source: ${_nfs_path}"
+    fi
+done
+
 # ---------------------------------------------------------------------------
 # Phase 3: Syntax Validation
 # ---------------------------------------------------------------------------
