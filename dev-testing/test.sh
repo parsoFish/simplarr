@@ -1,6 +1,6 @@
 #!/bin/bash
 # =============================================================================
-# Simplarr Test Suite — Phases 1–9 (Bash)
+# Simplarr Test Suite — Phases 1–10 (Bash)
 # =============================================================================
 # Self-contained test runner covering preflight, file existence, syntax
 # validation, nginx config content checks, qBittorrent template validation,
@@ -140,7 +140,7 @@ section() {
 
 printf "\n%b" "${BOLD}${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
-printf "  Simplarr Test Suite — Phases 1–9\n"
+printf "  Simplarr Test Suite — Phases 1–10\n"
 printf "════════════════════════════════════════════════════════════\n"
 printf "%b\n" "${NC}"
 
@@ -1011,6 +1011,169 @@ else
             fail "get_arr_api_key — ${_svc9}: no valid API key found in config.xml"
         fi
     done
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 10: Config File Structure Validation
+# ---------------------------------------------------------------------------
+
+section "Phase 10: Config File Structure Validation"
+
+if [[ "${_PHASE8_SUCCESS}" != "true" ]]; then
+    skip "Config file validation — skipped (containers not started)"
+else
+    printf "\n"
+    info "Validating deep config file structure written by containers..."
+
+    # -- 10a: Radarr config.xml -------------------------------------------------
+
+    printf "\n"
+    info "Checking Radarr config.xml (ApiKey, Port=7878, BindAddress, UrlBase)..."
+    _radarr_cfg="${_TEST_CONFIG_DIR}/radarr/config.xml"
+    if [[ ! -f "${_radarr_cfg}" ]]; then
+        skip "Config file validation — radarr/config.xml not yet written; skipping"
+    else
+        if grep -qF '<ApiKey>' "${_TEST_CONFIG_DIR}/radarr/config.xml" 2>/dev/null; then
+            pass "Radarr config.xml — ApiKey present"
+        else
+            fail "Radarr config.xml — ApiKey missing or malformed"
+        fi
+        if grep -qF '<Port>7878</Port>' "${_radarr_cfg}"; then
+            pass "Radarr config.xml — Port=7878 present"
+        else
+            fail "Radarr config.xml — Port=7878 missing"
+        fi
+        if grep -qF '<BindAddress>' "${_radarr_cfg}"; then
+            pass "Radarr config.xml — <BindAddress> present"
+        else
+            fail "Radarr config.xml — <BindAddress> missing"
+        fi
+        if grep -qE '<UrlBase>|<urlBase>' "${_radarr_cfg}"; then
+            pass "Radarr config.xml — <UrlBase> present"
+        else
+            fail "Radarr config.xml — <UrlBase> missing"
+        fi
+    fi
+
+    # -- 10b: Sonarr config.xml -------------------------------------------------
+
+    printf "\n"
+    info "Checking Sonarr config.xml (ApiKey, Port=8989, BindAddress, UrlBase)..."
+    _sonarr_cfg="${_TEST_CONFIG_DIR}/sonarr/config.xml"
+    if [[ ! -f "${_sonarr_cfg}" ]]; then
+        skip "Config file validation — sonarr/config.xml not yet written; skipping"
+    else
+        if grep -qF '<ApiKey>' "${_sonarr_cfg}" 2>/dev/null; then
+            pass "Sonarr config.xml — ApiKey present"
+        else
+            fail "Sonarr config.xml — ApiKey missing or malformed"
+        fi
+        if grep -qF '<Port>8989</Port>' "${_sonarr_cfg}"; then
+            pass "Sonarr config.xml — Port=8989 present"
+        else
+            fail "Sonarr config.xml — Port=8989 missing"
+        fi
+        if grep -qF '<BindAddress>' "${_sonarr_cfg}"; then
+            pass "Sonarr config.xml — <BindAddress> present"
+        else
+            fail "Sonarr config.xml — <BindAddress> missing"
+        fi
+        if grep -qE '<UrlBase>|<urlBase>' "${_sonarr_cfg}"; then
+            pass "Sonarr config.xml — <UrlBase> present"
+        else
+            fail "Sonarr config.xml — <UrlBase> missing"
+        fi
+    fi
+
+    # -- 10c: Prowlarr config.xml -----------------------------------------------
+
+    printf "\n"
+    info "Checking Prowlarr config.xml (ApiKey, Port=9696, BindAddress, UrlBase)..."
+    _prowlarr_cfg="${_TEST_CONFIG_DIR}/prowlarr/config.xml"
+    if [[ ! -f "${_prowlarr_cfg}" ]]; then
+        skip "Config file validation — prowlarr/config.xml not yet written; skipping"
+    else
+        if grep -qF '<ApiKey>' "${_prowlarr_cfg}" 2>/dev/null; then
+            pass "Prowlarr config.xml — ApiKey present"
+        else
+            fail "Prowlarr config.xml — ApiKey missing or malformed"
+        fi
+        if grep -qF '<Port>9696</Port>' "${_prowlarr_cfg}"; then
+            pass "Prowlarr config.xml — Port=9696 present"
+        else
+            fail "Prowlarr config.xml — Port=9696 missing"
+        fi
+        if grep -qF '<BindAddress>' "${_prowlarr_cfg}"; then
+            pass "Prowlarr config.xml — <BindAddress> present"
+        else
+            fail "Prowlarr config.xml — <BindAddress> missing"
+        fi
+        if grep -qE '<UrlBase>|<urlBase>' "${_prowlarr_cfg}"; then
+            pass "Prowlarr config.xml — <UrlBase> present"
+        else
+            fail "Prowlarr config.xml — <UrlBase> missing"
+        fi
+    fi
+
+    # -- 10d: qBittorrent.conf --------------------------------------------------
+
+    printf "\n"
+    info "Checking qBittorrent configuration ([Preferences], WebUI)..."
+    _qb_cfg="${_TEST_CONFIG_DIR}/qbittorrent/qBittorrent/qBittorrent.conf"
+    if [[ ! -f "${_qb_cfg}" ]]; then
+        skip "Config file validation — qbittorrent config not yet written; skipping"
+    else
+        if grep -qF '[Preferences]' "${_qb_cfg}"; then
+            pass "qBittorrent.conf — [Preferences] section present"
+        else
+            fail "qBittorrent.conf — [Preferences] section missing"
+        fi
+        if grep -qE 'WebUI' "${_qb_cfg}"; then
+            pass "qBittorrent.conf — WebUI settings present"
+        else
+            fail "qBittorrent.conf — WebUI settings missing"
+        fi
+    fi
+
+    # -- 10e: Overseerr settings.json -------------------------------------------
+
+    printf "\n"
+    info "Checking Overseerr settings.json (JSON validity)..."
+    _overseerr_cfg="${_TEST_CONFIG_DIR}/overseerr/settings.json"
+    if [[ ! -f "${_overseerr_cfg}" ]]; then
+        skip "Config file validation — overseerr/settings.json not yet created (normal on first start)"
+    else
+        if command -v python3 >/dev/null 2>&1; then
+            if python3 -m json.tool "${_overseerr_cfg}" >/dev/null 2>&1; then
+                pass "Overseerr settings.json — valid JSON (python3)"
+            else
+                fail "Overseerr settings.json — invalid JSON"
+            fi
+        elif command -v jq >/dev/null 2>&1; then
+            if jq . "${_overseerr_cfg}" >/dev/null 2>&1; then
+                pass "Overseerr settings.json — valid JSON (jq)"
+            else
+                fail "Overseerr settings.json — invalid JSON"
+            fi
+        else
+            skip "Overseerr settings.json — python3 and jq unavailable; JSON validation skipped"
+        fi
+    fi
+
+    # -- 10f: Tautulli config.ini -----------------------------------------------
+
+    printf "\n"
+    info "Checking Tautulli config.ini (http_port=8181)..."
+    _tautulli_cfg="${_TEST_CONFIG_DIR}/tautulli/config.ini"
+    if [[ ! -f "${_tautulli_cfg}" ]]; then
+        skip "Config file validation — tautulli/config.ini not yet created (normal on first start)"
+    else
+        if grep -qE 'http_port.*8181|8181.*http_port' "${_tautulli_cfg}"; then
+            pass "Tautulli config.ini — http_port=8181 present"
+        else
+            fail "Tautulli config.ini — http_port=8181 not found"
+        fi
+    fi
 fi
 
 # ---------------------------------------------------------------------------
