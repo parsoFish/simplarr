@@ -31,6 +31,14 @@ QBITTORRENT_URL="${QBITTORRENT_URL:-http://localhost:8080}"
 OVERSEERR_URL="${OVERSEERR_URL:-http://localhost:5055}"
 TAUTULLI_URL="${TAUTULLI_URL:-http://localhost:8181}"
 
+# Service ports — override to match custom Docker port mappings
+RADARR_PORT="${RADARR_PORT:-7878}"
+SONARR_PORT="${SONARR_PORT:-8989}"
+
+# Retry configuration for wait_for_service
+WAIT_MAX_ATTEMPTS="${WAIT_MAX_ATTEMPTS:-30}"
+WAIT_RETRY_SECS="${WAIT_RETRY_SECS:-2}"
+
 # Internal Docker network names (used when configuring connections between services)
 RADARR_HOST="${RADARR_HOST:-radarr}"
 SONARR_HOST="${SONARR_HOST:-sonarr}"
@@ -82,18 +90,18 @@ wait_for_service() {
     local name=$1
     local url=$2
     local endpoint=$3
-    local max_attempts=30
+    local max_attempts="${WAIT_MAX_ATTEMPTS:-30}"
     local attempt=1
 
     log_info "Waiting for $name to be ready..."
 
-    while [ $attempt -le $max_attempts ]; do
+    while [ "$attempt" -le "$max_attempts" ]; do
         if curl -s -o /dev/null -w "%{http_code}" "${url}${endpoint}" | grep -q "200\|401\|302"; then
             log_success "$name is ready"
             return 0
         fi
         echo -n "."
-        sleep 2
+        sleep "${WAIT_RETRY_SECS:-2}"
         attempt=$((attempt + 1))
     done
 
@@ -580,7 +588,7 @@ add_radarr_to_overseerr() {
     local radarr_config="{
         \"name\": \"Radarr\",
         \"hostname\": \"${RADARR_HOST}\",
-        \"port\": 7878,
+        \"port\": ${RADARR_PORT},
         \"apiKey\": \"${radarr_api_key}\",
         \"useSsl\": false,
         \"baseUrl\": \"\",
@@ -637,7 +645,7 @@ add_sonarr_to_overseerr() {
     local sonarr_config="{
         \"name\": \"Sonarr\",
         \"hostname\": \"${SONARR_HOST}\",
-        \"port\": 8989,
+        \"port\": ${SONARR_PORT},
         \"apiKey\": \"${sonarr_api_key}\",
         \"useSsl\": false,
         \"baseUrl\": \"\",
