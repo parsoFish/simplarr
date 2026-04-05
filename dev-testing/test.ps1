@@ -317,6 +317,31 @@ if ($splitContent -match "server" -and $splitContent -match "location") {
     Write-Fail "nginx/split.conf may have issues"
 }
 
+Write-Test "Checking split.conf NAS IP substitution (YOUR_NAS_IP placeholder)..."
+$splitConfRaw = Get-Content -Raw "nginx/split.conf"
+$testNasIp = "192.0.2.1"
+$substitutedContent = $splitConfRaw -replace "YOUR_NAS_IP", $testNasIp
+$splitConfTmp = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), ".conf")
+$substitutedContent | Out-File -FilePath $splitConfTmp -Encoding utf8
+if ($substitutedContent -notmatch "YOUR_NAS_IP") {
+    Write-Pass "split.conf NAS IP substitution — YOUR_NAS_IP replaced in temp copy"
+} else {
+    Write-Fail "split.conf NAS IP substitution — YOUR_NAS_IP still present after -replace"
+}
+
+Write-Test "Validating substituted split.conf with nginx -t..."
+if (Get-Command nginx -ErrorAction SilentlyContinue) {
+    $nginxResult = & nginx -t -c $splitConfTmp 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Pass "nginx -t nginx/split.conf — syntax is ok"
+    } else {
+        Write-Fail "nginx -t nginx/split.conf — syntax error: $nginxResult"
+    }
+} else {
+    Write-Skip "nginx -t nginx/split.conf — nginx not available"
+}
+Remove-Item $splitConfTmp -ErrorAction SilentlyContinue
+
 Write-Test "Checking nginx configs have correct upstream/proxy targets..."
 $nginxUpstreams = @(
     @{ Name = "radarr"; Port = "7878" },
