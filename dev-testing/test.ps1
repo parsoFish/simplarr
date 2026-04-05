@@ -286,6 +286,35 @@ if ($LASTEXITCODE -eq 0) {
     Write-Fail "docker-compose-pi.yml has errors"
 }
 
+
+# =============================================================================
+# Structural Validation Tests (Split-Setup NFS Paths)
+# =============================================================================
+
+Write-Header "Structural Validation Tests (Split-Setup NFS Paths)"
+
+if (Test-Path "docker-compose-pi.yml") {
+    $piComposeContent = Get-Content -Path "docker-compose-pi.yml"
+
+    $nfsPaths = @(
+        @{ Path = "/mnt/nas/downloads"; Purpose = "radarr/sonarr media ingestion" },
+        @{ Path = "/mnt/nas/movies"; Purpose = "radarr library and tautulli statistics" },
+        @{ Path = "/mnt/nas/tv"; Purpose = "sonarr library and tautulli statistics" }
+    )
+
+    foreach ($nfsPath in $nfsPaths) {
+        Write-Test "Checking docker-compose-pi.yml declares $($nfsPath.Path) as host-side volume source..."
+        $match = $piComposeContent | Select-String -Pattern ('^\s+-\s+' + [regex]::Escape($nfsPath.Path) + ':')
+
+        if ($match) {
+            Write-Pass "docker-compose-pi.yml declares $($nfsPath.Path) (for $($nfsPath.Purpose))"
+        } else {
+            Write-Fail "docker-compose-pi.yml missing $($nfsPath.Path) — split-setup NFS binding broken (affects $($nfsPath.Purpose))"
+        }
+    }
+} else {
+    Write-Skip "NFS path validation — docker-compose-pi.yml not found"
+}
 # =============================================================================
 # Nginx Configuration Tests
 # =============================================================================
@@ -316,6 +345,31 @@ if ($splitContent -match "server" -and $splitContent -match "location") {
 } else {
     Write-Fail "nginx/split.conf may have issues"
 }
+
+Write-Test "Checking split.conf NAS IP substitution (YOUR_NAS_IP placeholder)..."
+$splitConfRaw = Get-Content -Raw "nginx/split.conf"
+$testNasIp = "192.0.2.1"
+$substitutedContent = $splitConfRaw -replace "YOUR_NAS_IP", $testNasIp
+$splitConfTmp = [System.IO.Path]::ChangeExtension([System.IO.Path]::GetTempFileName(), ".conf")
+$substitutedContent | Out-File -FilePath $splitConfTmp -Encoding utf8
+if ($substitutedContent -notmatch "YOUR_NAS_IP") {
+    Write-Pass "split.conf NAS IP substitution — YOUR_NAS_IP replaced in temp copy"
+} else {
+    Write-Fail "split.conf NAS IP substitution — YOUR_NAS_IP still present after -replace"
+}
+
+Write-Test "Validating substituted split.conf with nginx -t..."
+if (Get-Command nginx -ErrorAction SilentlyContinue) {
+    $nginxResult = & nginx -t -c $splitConfTmp 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Pass "nginx -t nginx/split.conf — syntax is ok"
+    } else {
+        Write-Fail "nginx -t nginx/split.conf — syntax error: $nginxResult"
+    }
+} else {
+    Write-Skip "nginx -t nginx/split.conf — nginx not available"
+}
+Remove-Item $splitConfTmp -ErrorAction SilentlyContinue
 
 Write-Test "Checking nginx configs have correct upstream/proxy targets..."
 $nginxUpstreams = @(
