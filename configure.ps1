@@ -25,6 +25,10 @@ param(
     [string]$ProwlarrUrl = "http://localhost:9696",
     [string]$QBittorrentUrl = "http://localhost:8080",
     [string]$OverseerrUrl = "http://localhost:5055",
+    [int]$RadarrPort = 7878,
+    [int]$SonarrPort = 8989,
+    [int]$ProwlarrPort = 9696,
+    [int]$QBittorrentPort = 8080,
     [string]$ConfigDir = ".\configs",
     [string]$QBittorrentHost = $env:QBITTORRENT_HOST
 )
@@ -229,7 +233,7 @@ function Add-QBittorrentToRadarr {
         name = "qBittorrent"
         fields = @(
             @{ name = "host"; value = $QBittorrentHost }
-            @{ name = "port"; value = 8080 }
+            @{ name = "port"; value = $QBittorrentPort }
             @{ name = "useSsl"; value = $false }
             @{ name = "urlBase"; value = "" }
             @{ name = "username"; value = $QbUsername }
@@ -279,7 +283,7 @@ function Add-QBittorrentToSonarr {
         name = "qBittorrent"
         fields = @(
             @{ name = "host"; value = $QBittorrentHost }
-            @{ name = "port"; value = 8080 }
+            @{ name = "port"; value = $QBittorrentPort }
             @{ name = "useSsl"; value = $false }
             @{ name = "urlBase"; value = "" }
             @{ name = "username"; value = $QbUsername }
@@ -327,8 +331,8 @@ function Add-RadarrToProwlarr {
         syncLevel = "fullSync"
         name = "Radarr"
         fields = @(
-            @{ name = "prowlarrUrl"; value = "http://${ProwlarrHost}:9696" }
-            @{ name = "baseUrl"; value = "http://${RadarrHost}:$RadarrPort" }
+            @{ name = "prowlarrUrl"; value = "http://${ProwlarrHost}:${ProwlarrPort}" }
+            @{ name = "baseUrl"; value = "http://${RadarrHost}:${RadarrPort}" }
             @{ name = "apiKey"; value = $RadarrKey }
             @{ name = "syncCategories"; value = @(2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080) }
         )
@@ -367,8 +371,8 @@ function Add-SonarrToProwlarr {
         syncLevel = "fullSync"
         name = "Sonarr"
         fields = @(
-            @{ name = "prowlarrUrl"; value = "http://${ProwlarrHost}:9696" }
-            @{ name = "baseUrl"; value = "http://${SonarrHost}:$SonarrPort" }
+            @{ name = "prowlarrUrl"; value = "http://${ProwlarrHost}:${ProwlarrPort}" }
+            @{ name = "baseUrl"; value = "http://${SonarrHost}:${SonarrPort}" }
             @{ name = "apiKey"; value = $SonarrKey }
             @{ name = "syncCategories"; value = @(5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080) }
         )
