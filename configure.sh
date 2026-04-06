@@ -139,26 +139,27 @@ get_arr_api_key() {
 
 # Get qBittorrent temporary password from docker logs
 get_qbittorrent_password() {
-    local container_name="${1:-qbittorrent}"
+    local container_name="${1:-${QBITTORRENT_CONTAINER:-qbittorrent}}"
 
     if [ -n "$QB_PASSWORD" ]; then
         echo "$QB_PASSWORD"
         return 0
     fi
 
-    log_info "Retrieving qBittorrent temporary password from logs..."
+    # Log messages go to stderr so they don't pollute the captured return value.
+    log_info "Retrieving qBittorrent temporary password from logs..." >&2
 
     local password
     password=$(docker logs "$container_name" 2>&1 | grep -oP 'temporary password[^:]*:\s*\K\S+' | tail -1)
 
     if [ -n "$password" ]; then
-        log_success "Retrieved qBittorrent password"
+        log_success "Retrieved qBittorrent password" >&2
         echo "$password"
         return 0
     fi
 
-    log_error "Could not retrieve qBittorrent password from logs"
-    log_info "You can set QB_PASSWORD environment variable manually"
+    log_error "Could not retrieve qBittorrent password from logs" >&2
+    log_info "You can set QB_PASSWORD environment variable manually" >&2
     return 1
 }
 
@@ -738,12 +739,17 @@ main() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    # Get qBittorrent password from logs if not provided
-    QB_PASSWORD=$(get_qbittorrent_password "qbittorrent")
+    # Get qBittorrent password from logs if not provided.
+    # Suppress set -e failure so a missing password doesn't abort the script;
+    # the caller handles the empty-string case below.
+    QB_PASSWORD=$(get_qbittorrent_password "${QBITTORRENT_CONTAINER:-qbittorrent}") || QB_PASSWORD=""
     if [ -z "$QB_PASSWORD" ]; then
         log_warn "Could not retrieve qBittorrent password automatically."
-        log_info "Please check: docker logs qbittorrent 2>&1 | grep -i password"
-        read -rp "Enter qBittorrent WebUI password: " QB_PASSWORD
+        log_info "Please check: docker logs ${QBITTORRENT_CONTAINER:-qbittorrent} 2>&1 | grep -i password"
+        # Only prompt when running interactively; skip in CI / test mode.
+        if [[ -t 0 ]]; then
+            read -rp "Enter qBittorrent WebUI password: " QB_PASSWORD
+        fi
     fi
 
     add_qbittorrent_to_radarr "$RADARR_API_KEY"
@@ -754,6 +760,18 @@ main() {
     echo -e "${BLUE}                    Configuring Root Folders${NC}"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
+
+    # When QBITTORRENT_CONTAINER is set, derive the arr container names from the same
+    # Docker Compose project and pre-create the media directories inside those containers.
+    # This is required in isolated test stacks where volumes are not pre-populated;
+    # production deployments mount the directories via docker-compose, so this is a no-op.
+    if [[ -n "${QBITTORRENT_CONTAINER:-}" ]]; then
+        _arr_prefix="${QBITTORRENT_CONTAINER%-qbittorrent-1}"
+        docker exec "${_arr_prefix}-radarr-1" \
+            bash -c "mkdir -p '${MOVIES_PATH}' && chown abc:abc '${MOVIES_PATH}'" 2>/dev/null || true
+        docker exec "${_arr_prefix}-sonarr-1" \
+            bash -c "mkdir -p '${TV_PATH}' && chown abc:abc '${TV_PATH}'" 2>/dev/null || true
+    fi
 
     add_radarr_root_folder "$RADARR_API_KEY"
     add_sonarr_root_folder "$SONARR_API_KEY"
@@ -791,9 +809,15 @@ main() {
 
     if ! initialize_overseerr; then
         log_error "Overseerr is not initialized. Please sign in with your Plex account at $OVERSEERR_URL"
-        echo "Complete the Overseerr sign-in, then press Enter to continue."
-        echo "Or type 'skip' to skip Overseerr configuration for now."
-        read -rp "Continue: " overseerr_choice || overseerr_choice=""
+        overseerr_choice=""
+        # Only prompt when running interactively; skip in CI / test mode.
+        if [[ -t 0 ]]; then
+            echo "Complete the Overseerr sign-in, then press Enter to continue."
+            echo "Or type 'skip' to skip Overseerr configuration for now."
+            read -rp "Continue: " overseerr_choice
+        else
+            log_warn "Skipping Overseerr configuration (non-interactive mode)"
+        fi
         if [[ "$overseerr_choice" =~ ^(skip|s)$ ]]; then
             log_warn "Skipping Overseerr configuration"
         elif ! initialize_overseerr; then
