@@ -5,5 +5,23 @@
   "sonarr": ${SONARR_PORT},
   "prowlarr": ${PROWLARR_PORT},
   "qbittorrent": ${QBITTORRENT_PORT},
-  "tautulli": ${TAUTULLI_PORT}
+  "tautulli": ${TAUTULLI_PORT},
+  "apiPaths": {
+    "plex": "/plex",
+    "radarr": "/radarr",
+    "sonarr": "/sonarr",
+    "prowlarr": "/prowlarr",
+    "overseerr": "/overseerr",
+    "qbittorrent": "/qbittorrent",
+    "tautulli": "/tautulli"
+  },
+  "healthPaths": {
+    "plex": "/plex/identity",
+    "radarr": "/radarr/ping",
+    "sonarr": "/sonarr/ping",
+    "prowlarr": "/prowlarr/ping",
+    "overseerr": "/overseerr/api/v1/status",
+    "qbittorrent": "/qbittorrent/",
+    "tautulli": "/tautulli/status"
+  }
 }
