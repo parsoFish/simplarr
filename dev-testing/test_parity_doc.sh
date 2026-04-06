@@ -38,7 +38,6 @@ DOC_FILE="${PROJECT_ROOT}/docs/dev-testing/test-parity.md"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
@@ -82,6 +81,7 @@ doc_contains_i() {
 
 # Returns the line number of the first match, or empty if not found
 doc_line_of() {
+    # shellcheck disable=SC2317
     grep -nE "$1" "${DOC_FILE}" 2>/dev/null | head -1 | cut -d: -f1
 }
 
