@@ -741,6 +741,9 @@ else
     for _svc8 in radarr sonarr prowlarr overseerr qbittorrent tautulli; do
         mkdir -p "${_TEST_CONFIG_DIR}/${_svc8}"
     done
+    # Create media directories mounted into arr containers for root folder creation
+    mkdir -p "${_TEST_CONFIG_DIR}/media/movies"
+    mkdir -p "${_TEST_CONFIG_DIR}/media/tv"
 
     pass "Created test config directories under ${_TEST_CONFIG_DIR}"
 
@@ -759,6 +762,7 @@ services:
       - TZ=UTC
     volumes:
       - ${_TEST_CONFIG_DIR}/radarr:/config
+      - ${_TEST_CONFIG_DIR}/media/movies:/movies
     healthcheck:
       test: curl -f http://localhost:7878/ping || exit 1
       interval: 10s
@@ -776,6 +780,7 @@ services:
       - TZ=UTC
     volumes:
       - ${_TEST_CONFIG_DIR}/sonarr:/config
+      - ${_TEST_CONFIG_DIR}/media/tv:/tv
     healthcheck:
       test: curl -f http://localhost:8989/ping || exit 1
       interval: 10s
@@ -1073,7 +1078,7 @@ else
         -H "X-Api-Key: ${_RADARR_API_KEY}" \
         "http://localhost:${PORT_RADARR}/api/v3/rootfolder" 2>/dev/null || true)
 
-    if echo "${_existing_folders}" | grep -q '"path":"/movies"'; then
+    if echo "${_existing_folders}" | grep -qE '"path"\s*:\s*"/movies"'; then
         pass "Phase 10 — Radarr /movies root folder already exists (idempotent)"
     else
         _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
@@ -1097,7 +1102,7 @@ else
         -H "X-Api-Key: ${_SONARR_API_KEY}" \
         "http://localhost:${PORT_SONARR}/api/v3/rootfolder" 2>/dev/null || true)
 
-    if echo "${_existing_folders}" | grep -q '"path":"/tv"'; then
+    if echo "${_existing_folders}" | grep -qE '"path"\s*:\s*"/tv"'; then
         pass "Phase 10 — Sonarr /tv root folder already exists (idempotent)"
     else
         _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
@@ -1125,7 +1130,7 @@ else
             -H "X-Api-Key: ${_RADARR_API_KEY}" \
             "http://localhost:${PORT_RADARR}/api/v3/downloadclient" 2>/dev/null || true)
 
-        if echo "${_existing_clients}" | grep -q '"name":"qBittorrent"'; then
+        if echo "${_existing_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
             pass "Phase 10 — qBittorrent already in Radarr download clients (idempotent)"
         else
             _qbit_radarr_body=$(printf '{
@@ -1175,7 +1180,7 @@ else
             -H "X-Api-Key: ${_SONARR_API_KEY}" \
             "http://localhost:${PORT_SONARR}/api/v3/downloadclient" 2>/dev/null || true)
 
-        if echo "${_existing_clients}" | grep -q '"name":"qBittorrent"'; then
+        if echo "${_existing_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
             pass "Phase 10 — qBittorrent already in Sonarr download clients (idempotent)"
         else
             _qbit_sonarr_body=$(printf '{
@@ -1223,7 +1228,7 @@ else
         -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
         "http://localhost:${PORT_PROWLARR}/api/v1/applications" 2>/dev/null || true)
 
-    if echo "${_existing_apps}" | grep -q '"name":"Radarr"'; then
+    if echo "${_existing_apps}" | grep -qE '"name"\s*:\s*"Radarr"'; then
         pass "Phase 10 — Radarr already in Prowlarr applications (idempotent)"
     else
         _radarr_app_body=$(printf '{
@@ -1254,7 +1259,7 @@ else
 
     info "Adding Sonarr as application to Prowlarr..."
 
-    if echo "${_existing_apps}" | grep -q '"name":"Sonarr"'; then
+    if echo "${_existing_apps}" | grep -qE '"name"\s*:\s*"Sonarr"'; then
         pass "Phase 10 — Sonarr already in Prowlarr applications (idempotent)"
     else
         _sonarr_app_body=$(printf '{
@@ -1304,7 +1309,7 @@ else
         _defname="${_INDEXER_DEF_NAMES[${_idx}]}"
         _baseurl="${_INDEXER_BASE_URLS[${_idx}]}"
 
-        if echo "${_existing_indexers}" | grep -q "\"name\":\"${_iname}\""; then
+        if echo "${_existing_indexers}" | grep -qE "\"name\"\\s*:\\s*\"${_iname}\""; then
             (( _indexer_skip_count++ )) || true
             continue
         fi
@@ -1347,13 +1352,13 @@ else
     # -- 10i: Trigger Prowlarr sync -----------------------------------------
 
     printf "\n"
-    info "Triggering Prowlarr sync to connected apps (ApplicationIndexerSyncAll)..."
+    info "Triggering Prowlarr sync to connected apps (ApplicationIndexerSync)..."
 
     _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
         -X POST \
         -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
         -H "Content-Type: application/json" \
-        -d '{"name":"ApplicationIndexerSyncAll"}' \
+        -d '{"name":"ApplicationIndexerSync"}' \
         "http://localhost:${PORT_PROWLARR}/api/v1/command" 2>/dev/null || echo "000")
 
     if [[ "${_http}" =~ ^2 ]]; then
@@ -1372,7 +1377,7 @@ else
     _folders=$(curl -s --max-time 10 \
         -H "X-Api-Key: ${_RADARR_API_KEY}" \
         "http://localhost:${PORT_RADARR}/api/v3/rootfolder" 2>/dev/null || true)
-    if echo "${_folders}" | grep -q '"path":"/movies"'; then
+    if echo "${_folders}" | grep -qE '"path"\s*:\s*"/movies"'; then
         pass "Phase 10 — Radarr has /movies root folder"
     else
         fail "Phase 10 — Radarr is missing /movies root folder"
@@ -1381,7 +1386,7 @@ else
     _folders=$(curl -s --max-time 10 \
         -H "X-Api-Key: ${_SONARR_API_KEY}" \
         "http://localhost:${PORT_SONARR}/api/v3/rootfolder" 2>/dev/null || true)
-    if echo "${_folders}" | grep -q '"path":"/tv"'; then
+    if echo "${_folders}" | grep -qE '"path"\s*:\s*"/tv"'; then
         pass "Phase 10 — Sonarr has /tv root folder"
     else
         fail "Phase 10 — Sonarr is missing /tv root folder"
@@ -1399,7 +1404,7 @@ else
         _clients=$(curl -s --max-time 10 \
             -H "X-Api-Key: ${_RADARR_API_KEY}" \
             "http://localhost:${PORT_RADARR}/api/v3/downloadclient" 2>/dev/null || true)
-        if echo "${_clients}" | grep -q '"name":"qBittorrent"'; then
+        if echo "${_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
             pass "Phase 10 — Radarr has qBittorrent download client"
         else
             fail "Phase 10 — Radarr is missing qBittorrent download client"
@@ -1408,7 +1413,7 @@ else
         _clients=$(curl -s --max-time 10 \
             -H "X-Api-Key: ${_SONARR_API_KEY}" \
             "http://localhost:${PORT_SONARR}/api/v3/downloadclient" 2>/dev/null || true)
-        if echo "${_clients}" | grep -q '"name":"qBittorrent"'; then
+        if echo "${_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
             pass "Phase 10 — Sonarr has qBittorrent download client"
         else
             fail "Phase 10 — Sonarr is missing qBittorrent download client"
@@ -1438,13 +1443,13 @@ else
         -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
         "http://localhost:${PORT_PROWLARR}/api/v1/applications" 2>/dev/null || true)
 
-    if echo "${_prowlarr_apps}" | grep -q '"name":"Radarr"'; then
+    if echo "${_prowlarr_apps}" | grep -qE '"name"\s*:\s*"Radarr"'; then
         pass "Phase 10 — Prowlarr has Radarr connected"
     else
         fail "Phase 10 — Prowlarr is missing Radarr connection"
     fi
 
-    if echo "${_prowlarr_apps}" | grep -q '"name":"Sonarr"'; then
+    if echo "${_prowlarr_apps}" | grep -qE '"name"\s*:\s*"Sonarr"'; then
         pass "Phase 10 — Prowlarr has Sonarr connected"
     else
         fail "Phase 10 — Prowlarr is missing Sonarr connection"
