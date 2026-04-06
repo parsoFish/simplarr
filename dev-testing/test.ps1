@@ -12,8 +12,8 @@
 #   .\test.ps1 -Cleanup     # Clean up test containers after running
 #
 # Test Phases:
-#   1–9  File validation, syntax checks, container start, API integration
-#   10   VPN Container Wiring — docker compose config VPN overlay assertions
+#   1-9  File validation, syntax checks, container start, API integration
+#   10   VPN Container Wiring  -  docker compose config VPN overlay assertions
 # =============================================================================
 
 param(
@@ -1585,7 +1585,7 @@ if ($prowlarrApiKey) {
 Write-Output ""
 
 # =============================================================================
-# Phase 10 — VPN Container Wiring
+# Phase 10  -  VPN Container Wiring
 # =============================================================================
 # 10a: Parse docker compose config of a minimal self-contained VPN overlay
 #      mirroring what a user sees after uncommenting the gluetun blocks in
@@ -1593,13 +1593,13 @@ Write-Output ""
 #      depends_on wiring without starting any containers.
 # 10b: Runtime container assertions guarded by /dev/net/tun existence check.
 #      Each guarded test emits Write-Skip when the TUN device is absent.
-# 10c: VPN connectivity check — always Write-Skip (requires real credentials).
+# 10c: VPN connectivity check  -  always Write-Skip (requires real credentials).
 # =============================================================================
 
-Write-Header "Phase 10 — VPN Container Wiring"
+Write-Header "Phase 10  -  VPN Container Wiring"
 
 # ---------------------------------------------------------------------------
-# Phase 10a — docker compose config resolution of a minimal VPN overlay
+# Phase 10a  -  docker compose config resolution of a minimal VPN overlay
 # ---------------------------------------------------------------------------
 
 Write-Test "Phase 10a: Parsing docker compose config of a VPN wiring overlay..."
@@ -1609,7 +1609,7 @@ New-Item -ItemType Directory -Force -Path $vpnWiringTmpDir | Out-Null
 
 $vpnOverlayPath = Join-Path $vpnWiringTmpDir 'gluetun-vpn-wiring.yml'
 
-# Minimal VPN overlay with hard-coded values — mirrors the commented gluetun +
+# Minimal VPN overlay with hard-coded values  -  mirrors the commented gluetun +
 # qbittorrent VPN override blocks in docker-compose-unified.yml.
 @'
 services:
@@ -1715,27 +1715,27 @@ if (-not $vpnConfigSuccess) {
 Remove-Item -Recurse -Force $vpnWiringTmpDir -ErrorAction SilentlyContinue
 
 # ---------------------------------------------------------------------------
-# Phase 10b — Runtime container assertions
-# Guarded by /dev/net/tun — skip when TUN device is absent (CI, WSL, macOS).
+# Phase 10b  -  Runtime container assertions
+# Guarded by /dev/net/tun  -  skip when TUN device is absent (CI, WSL, macOS).
 # ---------------------------------------------------------------------------
 
 Write-Test "Phase 10b: Checking for /dev/net/tun device (required for gluetun)..."
 if (Test-Path '/dev/net/tun') {
-    Write-Pass "TUN device /dev/net/tun found — gluetun runtime assertions can proceed"
+    Write-Pass "TUN device /dev/net/tun found  -  gluetun runtime assertions can proceed"
     # Runtime assertions would start gluetun and docker inspect State.Status=running.
-    # These require real VPN credentials and are always skipped — see Phase 10c.
-    Write-Skip "Gluetun container start test (TUN device present but Real VPN credentials required — see Phase 10c)"
+    # These require real VPN credentials and are always skipped  -  see Phase 10c.
+    Write-Skip "Gluetun container start test (TUN device present but Real VPN credentials required  -  see Phase 10c)"
 } else {
-    Write-Skip "Gluetun container start test (TUN device /dev/net/tun absent — cannot start gluetun)"
+    Write-Skip "Gluetun container start test (TUN device /dev/net/tun absent  -  cannot start gluetun)"
     Write-Skip "Gluetun container state inspection (TUN device /dev/net/tun absent)"
 }
 
 # ---------------------------------------------------------------------------
-# Phase 10c — VPN connectivity (always skipped — requires real credentials)
+# Phase 10c  -  VPN connectivity (always skipped  -  requires real credentials)
 # Cannot be automated: genuine VPN provider credentials are required.
 # ---------------------------------------------------------------------------
 
-Write-Skip "VPN connectivity check: Real VPN credentials required — cannot be automated in CI"
+Write-Skip "VPN connectivity check: Real VPN credentials required  -  cannot be automated in CI"
 
 # =============================================================================
 # Cleanup
