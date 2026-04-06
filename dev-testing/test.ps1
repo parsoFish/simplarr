@@ -724,6 +724,64 @@ if ($foundKey -eq $mockApiKey) {
 Remove-Item -Recurse -Force $overseerrMockDir -ErrorAction SilentlyContinue
 
 # =============================================================================
+# Port Literal Guard Tests
+# =============================================================================
+#
+# These tests ensure configure.sh and configure.ps1 contain no stray hardcoded
+# port literals outside of their single-source-of-truth variable default-value
+# lines. Adding a port number inline (rather than through a declared variable)
+# breaks the centralization guarantee and causes silent drift.
+#
+# Acceptable — single-source-of-truth declarations:
+#   configure.sh:  RADARR_URL="${RADARR_URL:-http://localhost:7878}"
+#   configure.ps1: [string]$RadarrUrl = "http://localhost:7878"
+#
+# Stray — port hardcoded outside a default declaration (must not exist):
+#   {"name": "port", "value": 7878}
+#   "http://${RADARR_HOST}:7878/api/..."
+#
+# Ports guarded: 7878 (Radarr), 8989 (Sonarr), 9696 (Prowlarr),
+#                8080 (qBittorrent), 5055 (Overseerr), 8181 (Tautulli),
+#                32400 (Plex)
+
+Write-Header "Port Literal Guard Tests"
+
+$portLiteralPattern = "7878|8989|9696|8080|5055|8181|32400"
+
+Write-Test "Checking configure.sh has no stray hardcoded port literals..."
+# Port literals are acceptable only on bash variable default-value lines using
+# the ${VAR:-default} syntax. Any other occurrence is a centralization violation.
+if (Test-Path "configure.sh") {
+    $strayMatchesSh = Select-String -Path "configure.sh" -Pattern $portLiteralPattern |
+        Where-Object { $_.Line -notmatch '\$\{[A-Z_]+:-' }
+    if ($strayMatchesSh.Count -eq 0) {
+        Write-Pass "configure.sh — no stray port literals outside variable default-value lines"
+    } else {
+        Write-Fail "configure.sh — $($strayMatchesSh.Count) stray port literal(s) found outside variable default-value lines:"
+        $strayMatchesSh | ForEach-Object { Write-Info "  Line $($_.LineNumber): $($_.Line.Trim())" }
+    }
+} else {
+    Write-Fail "configure.sh not found — cannot run port literal guard"
+}
+
+Write-Test "Checking configure.ps1 has no stray hardcoded port literals..."
+# Port literals are acceptable only on PowerShell parameter default-value
+# declarations matching [type]$Name = value. Any other occurrence is a
+# centralization violation.
+if (Test-Path "configure.ps1") {
+    $strayMatchesPs1 = Select-String -Path "configure.ps1" -Pattern $portLiteralPattern |
+        Where-Object { $_.Line -notmatch '^\s*\[(string|int|bool)\]\$' }
+    if ($strayMatchesPs1.Count -eq 0) {
+        Write-Pass "configure.ps1 — no stray port literals outside parameter default-value declarations"
+    } else {
+        Write-Fail "configure.ps1 — $($strayMatchesPs1.Count) stray port literal(s) found outside parameter default-value declarations:"
+        $strayMatchesPs1 | ForEach-Object { Write-Info "  Line $($_.LineNumber): $($_.Line.Trim())" }
+    }
+} else {
+    Write-Fail "configure.ps1 not found — cannot run port literal guard"
+}
+
+# =============================================================================
 # Quick Mode Exit
 # =============================================================================
 
