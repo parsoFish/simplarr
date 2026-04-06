@@ -5,7 +5,7 @@
 # Self-contained test runner covering preflight, file existence, syntax
 # validation, nginx config content checks, qBittorrent template validation,
 # setup script validation, configure script validation, container startup,
-# live service connectivity, full API service wiring, and VPN container wiring.
+# live service connectivity, full API service wiring, VPN wiring, and wiring verification.
 #
 # Usage:
 #   ./dev-testing/test.sh
@@ -17,22 +17,23 @@
 # Requirements:
 #   - bash >= 4.0
 #   - docker (optional; phases that need it are skipped when unavailable)
+#   - python3 or jq (Phase 10 JSON parsing; skipped if neither is available)
 #
-# Environment Variables (Phases 8–9):
+# Environment Variables (Phases 8–10):
 #   SIMPLARR_TEST_TIMEOUT   — seconds to wait for container health (default: 120)
 #   SIMPLARR_TEST_BASE_PORT — override random base port for test services
 #
 # Phases:
 #   1  Preflight     — Docker and docker compose availability
-#   2  File       — Required project files exist
-#   3  Syntax     — bash -n, docker compose config --quiet, nginx -t
-#   4  Nginx      — Upstream proxy_pass targets and location routes
-#   5  qBittorrent — Template/config validation (static analysis only)
-#   6  Setup      — setup.sh env vars, modes, qBittorrent template deploy
+#   2  File          — Required project files exist
+#   3  Syntax        — bash -n, docker compose config --quiet, nginx -t
+#   4  Nginx         — Upstream proxy_pass targets and location routes
+#   5  qBittorrent   — Template/config validation (static analysis only)
+#   6  Setup         — setup.sh env vars, modes, qBittorrent template deploy
 #   7  Configure     — configure.sh/configure.ps1 API function presence
 #   8  Container     — Spin up isolated stack; verify all health checks pass
 #   9  Connectivity  — Health endpoints, config.xml creation, get_arr_api_key
-#  10  Wiring        — qBit password, root folders, download clients, Prowlarr apps/indexers/sync, VPN wiring
+#  10  Wiring        — qBit password, root folders, download clients, Prowlarr apps/indexers/sync, VPN wiring, verification
 # =============================================================================
 
 set -uo pipefail
@@ -72,6 +73,7 @@ _RADARR_API_KEY=""
 _SONARR_API_KEY=""
 _PROWLARR_API_KEY=""
 _QBIT_PASSWORD=""
+_PHASE9_SUCCESS=false
 
 _TEST_BASE_PORT=0
 
