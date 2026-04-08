@@ -18,8 +18,10 @@
     Justification = 'This interactive configuration script intentionally uses Write-Host for colored console output. Write-Output cannot produce the colored terminal UI required for the user experience.'
 )]
 param(
-    [string]$RadarrUrl = "http://localhost:7878",
-    [string]$SonarrUrl = "http://localhost:8989",
+    [int]$RadarrPort = $(if ($env:RADARR_PORT) { [int]$env:RADARR_PORT } else { 7878 }),
+    [int]$SonarrPort = $(if ($env:SONARR_PORT) { [int]$env:SONARR_PORT } else { 8989 }),
+    [string]$RadarrUrl = "http://localhost:$RadarrPort",
+    [string]$SonarrUrl = "http://localhost:$SonarrPort",
     [string]$ProwlarrUrl = "http://localhost:9696",
     [string]$QBittorrentUrl = "http://localhost:8080",
     [string]$OverseerrUrl = "http://localhost:5055",
@@ -167,7 +169,8 @@ function Wait-ForService {
         [string]$Name,
         [string]$Url,
         [string]$Endpoint,
-        [int]$MaxAttempts = 30
+        [int]$MaxAttempts = $(if ($env:WAIT_MAX_ATTEMPTS) { [int]$env:WAIT_MAX_ATTEMPTS } else { 30 }),
+        [int]$SleepSeconds = $(if ($env:WAIT_RETRY_SECS) { [int]$env:WAIT_RETRY_SECS } else { 2 })
     )
     
     Write-Info "Waiting for $Name to be ready..."
@@ -183,7 +186,7 @@ function Wait-ForService {
         catch {
             Write-Host "." -NoNewline
         }
-        Start-Sleep -Seconds 2
+        Start-Sleep -Seconds $SleepSeconds
     }
     
     Write-Host ""
@@ -325,7 +328,7 @@ function Add-RadarrToProwlarr {
         name = "Radarr"
         fields = @(
             @{ name = "prowlarrUrl"; value = "http://${ProwlarrHost}:9696" }
-            @{ name = "baseUrl"; value = "http://${RadarrHost}:7878" }
+            @{ name = "baseUrl"; value = "http://${RadarrHost}:$RadarrPort" }
             @{ name = "apiKey"; value = $RadarrKey }
             @{ name = "syncCategories"; value = @(2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080) }
         )
@@ -365,7 +368,7 @@ function Add-SonarrToProwlarr {
         name = "Sonarr"
         fields = @(
             @{ name = "prowlarrUrl"; value = "http://${ProwlarrHost}:9696" }
-            @{ name = "baseUrl"; value = "http://${SonarrHost}:8989" }
+            @{ name = "baseUrl"; value = "http://${SonarrHost}:$SonarrPort" }
             @{ name = "apiKey"; value = $SonarrKey }
             @{ name = "syncCategories"; value = @(5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080) }
         )
@@ -592,7 +595,7 @@ function Add-RadarrToOverseerr {
         $radarrConfig = @{
             name = "Radarr"
             hostname = $RadarrHost
-            port = 7878
+            port = $RadarrPort
             apiKey = $RadarrApiKey
             useSsl = $false
             baseUrl = ""
@@ -641,7 +644,7 @@ function Add-SonarrToOverseerr {
         $sonarrConfig = @{
             name = "Sonarr"
             hostname = $SonarrHost
-            port = 8989
+            port = $SonarrPort
             apiKey = $SonarrApiKey
             useSsl = $false
             baseUrl = ""
