@@ -2,7 +2,7 @@
 # Simplarr Automated Test Script (PowerShell)
 # =============================================================================
 # This script validates that all Simplarr components work together correctly.
-# 
+#
 # IMPORTANT: Plex claim/setup tests are EXCLUDED because they require manual
 # token generation. This script tests everything else.
 #
@@ -10,6 +10,10 @@
 #   .\test.ps1              # Run all tests
 #   .\test.ps1 -Quick       # Skip container startup tests (syntax/file checks only)
 #   .\test.ps1 -Cleanup     # Clean up test containers after running
+#
+# Test Phases:
+#   1-9  File validation, syntax checks, container start, API integration
+#   10   VPN Container Wiring  -  docker compose config VPN overlay assertions
 # =============================================================================
 
 param(
@@ -1579,6 +1583,159 @@ if ($prowlarrApiKey) {
 }
 
 Write-Output ""
+
+# =============================================================================
+# Phase 10  -  VPN Container Wiring
+# =============================================================================
+# 10a: Parse docker compose config of a minimal self-contained VPN overlay
+#      mirroring what a user sees after uncommenting the gluetun blocks in
+#      docker-compose-unified.yml.  Asserts network_mode, port ownership, and
+#      depends_on wiring without starting any containers.
+# 10b: Runtime container assertions guarded by /dev/net/tun existence check.
+#      Each guarded test emits Write-Skip when the TUN device is absent.
+# 10c: VPN connectivity check  -  always Write-Skip (requires real credentials).
+# =============================================================================
+
+Write-Header "Phase 10  -  VPN Container Wiring"
+
+# ---------------------------------------------------------------------------
+# Phase 10a  -  docker compose config resolution of a minimal VPN overlay
+# ---------------------------------------------------------------------------
+
+Write-Test "Phase 10a: Parsing docker compose config of a VPN wiring overlay..."
+
+$vpnWiringTmpDir = Join-Path ([System.IO.Path]::GetTempPath()) "simplarr-vpn-wiring-ps-$PID"
+New-Item -ItemType Directory -Force -Path $vpnWiringTmpDir | Out-Null
+
+$vpnOverlayPath = Join-Path $vpnWiringTmpDir 'gluetun-vpn-wiring.yml'
+
+# Minimal VPN overlay with hard-coded values  -  mirrors the commented gluetun +
+# qbittorrent VPN override blocks in docker-compose-unified.yml.
+@'
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.1
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    environment:
+      - VPN_SERVICE_PROVIDER=mullvad
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=test-user
+      - OPENVPN_PASSWORD=test-password
+    volumes:
+      - /tmp/simplarr-vpn-test/gluetun:/gluetun
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - WEBUI_PORT=8080
+    volumes:
+      - /tmp/simplarr-vpn-test/qbittorrent:/config
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    restart: unless-stopped
+'@ | Set-Content -Path $vpnOverlayPath -Encoding UTF8
+
+$vpnConfigOutput  = docker compose -f $vpnOverlayPath config 2>&1
+$vpnConfigSuccess = ($LASTEXITCODE -eq 0)
+$vpnConfigText    = $vpnConfigOutput -join "`n"
+
+if ($vpnConfigSuccess) {
+    Write-Pass "VPN overlay YAML resolves cleanly under docker compose config"
+} else {
+    Write-Fail "VPN overlay YAML failed docker compose config"
+    Write-Info "Output: $($vpnConfigOutput -join ' ')"
+}
+
+# Assert: qbittorrent has network_mode: service:gluetun
+Write-Test "Phase 10a: Asserting qbittorrent has network_mode: service:gluetun..."
+if (-not $vpnConfigSuccess) {
+    Write-Skip "network_mode assertion (docker compose config failed)"
+} elseif ($vpnConfigText -match 'network_mode:\s*service:gluetun') {
+    Write-Pass "qbittorrent uses network_mode: service:gluetun (shares gluetun network namespace)"
+} else {
+    Write-Fail "qbittorrent network_mode: service:gluetun not found in resolved config"
+}
+
+# Assert: gluetun owns port 8080 (qBittorrent WebUI port)
+Write-Test "Phase 10a: Asserting gluetun owns port 8080 (qBittorrent WebUI)..."
+if (-not $vpnConfigSuccess) {
+    Write-Skip "port 8080 assertion (docker compose config failed)"
+} elseif (($vpnConfigText -match 'published:\s*"?8080"?') -or ($vpnConfigText -match '8080:8080')) {
+    Write-Pass "gluetun owns port 8080 in resolved VPN config (qBittorrent WebUI)"
+} else {
+    Write-Fail "port 8080 not found under gluetun in resolved config"
+}
+
+# Assert: gluetun owns port 6881 (torrent traffic)
+Write-Test "Phase 10a: Asserting gluetun owns port 6881 (torrent traffic)..."
+if (-not $vpnConfigSuccess) {
+    Write-Skip "port 6881 assertion (docker compose config failed)"
+} elseif (($vpnConfigText -match 'published:\s*"?6881"?') -or ($vpnConfigText -match '6881:6881')) {
+    Write-Pass "gluetun owns port 6881 in resolved VPN config (torrent traffic)"
+} else {
+    Write-Fail "port 6881 not found under gluetun in resolved config"
+}
+
+# Assert: qbittorrent depends_on gluetun with condition: service_healthy
+Write-Test "Phase 10a: Asserting qbittorrent depends_on gluetun (condition: service_healthy)..."
+if (-not $vpnConfigSuccess) {
+    Write-Skip "depends_on assertion (docker compose config failed)"
+} elseif ($vpnConfigText -match 'condition:\s*service_healthy') {
+    Write-Pass "qbittorrent depends_on gluetun with condition: service_healthy"
+} else {
+    Write-Fail "qbittorrent depends_on gluetun (service_healthy) not found in resolved config"
+}
+
+# Clean up temporary VPN overlay directory
+Remove-Item -Recurse -Force $vpnWiringTmpDir -ErrorAction SilentlyContinue
+
+# ---------------------------------------------------------------------------
+# Phase 10b  -  Runtime container assertions
+# Guarded by /dev/net/tun  -  skip when TUN device is absent (CI, WSL, macOS).
+# ---------------------------------------------------------------------------
+
+Write-Test "Phase 10b: Checking for /dev/net/tun device (required for gluetun)..."
+if (Test-Path '/dev/net/tun') {
+    Write-Pass "TUN device /dev/net/tun found  -  gluetun runtime assertions can proceed"
+    # Runtime assertions would start gluetun and docker inspect State.Status=running.
+    # These require real VPN credentials and are always skipped  -  see Phase 10c.
+    Write-Skip "Gluetun container start test (TUN device present but Real VPN credentials required  -  see Phase 10c)"
+} else {
+    Write-Skip "Gluetun container start test (TUN device /dev/net/tun absent  -  cannot start gluetun)"
+    Write-Skip "Gluetun container state inspection (TUN device /dev/net/tun absent)"
+}
+
+# ---------------------------------------------------------------------------
+# Phase 10c  -  VPN connectivity (always skipped  -  requires real credentials)
+# Cannot be automated: genuine VPN provider credentials are required.
+# ---------------------------------------------------------------------------
+
+Write-Skip "VPN connectivity check: Real VPN credentials required  -  cannot be automated in CI"
 
 # =============================================================================
 # Cleanup
