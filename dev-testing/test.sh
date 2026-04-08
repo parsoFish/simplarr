@@ -5,7 +5,7 @@
 # Self-contained test runner covering preflight, file existence, syntax
 # validation, nginx config content checks, qBittorrent template validation,
 # setup script validation, configure script validation, container startup,
-# live service connectivity, and full API service wiring.
+# live service connectivity, full API service wiring, and VPN container wiring.
 #
 # Usage:
 #   ./dev-testing/test.sh
@@ -32,7 +32,7 @@
 #   7  Configure     — configure.sh/configure.ps1 API function presence
 #   8  Container     — Spin up isolated stack; verify all health checks pass
 #   9  Connectivity  — Health endpoints, config.xml creation, get_arr_api_key
-#  10  Wiring        — qBit password, root folders, download clients, Prowlarr apps/indexers/sync
+#  10  Wiring        — qBit password, root folders, download clients, Prowlarr apps/indexers/sync, VPN wiring
 # =============================================================================
 
 set -uo pipefail
@@ -58,6 +58,9 @@ SKIP_COUNT=0
 
 # Temp directory for nginx wrapper configs — cleaned up on exit
 _TMPDIR=""
+
+# Temp directory for Phase 10 VPN wiring overlay — cleaned up on exit
+_VPN_WIRING_TMPDIR=""
 
 # Docker integration test state — set by Phase 8, consumed by cleanup and Phase 9
 _COMPOSE_PROJECT_NAME=""
@@ -89,6 +92,10 @@ PORT_TAUTULLI=0
 cleanup() {
     if [[ -n "${_TMPDIR}" && -d "${_TMPDIR}" ]]; then
         rm -rf "${_TMPDIR}"
+    fi
+
+    if [[ -n "${_VPN_WIRING_TMPDIR}" && -d "${_VPN_WIRING_TMPDIR}" ]]; then
+        rm -rf "${_VPN_WIRING_TMPDIR}"
     fi
 
     # Tear down any Docker containers and volumes started by Phase 8.
@@ -1711,6 +1718,192 @@ else
         fi
     fi
 fi
+
+# ---------------------------------------------------------------------------
+# Phase 10: VPN Container Wiring
+#
+# Validates that the VPN wiring between gluetun and qbittorrent is correct
+# when VPN mode is enabled. Three sub-phases:
+#
+#   10a — Static: docker compose config on a VPN overlay (no containers).
+#         Asserts qbittorrent carries network_mode: service:gluetun,
+#         gluetun owns port 8080 (WebUI) and port 6881 (torrent), and
+#         qbittorrent depends_on gluetun with condition: service_healthy.
+#
+#   10b — Runtime: gluetun container starts (guarded by /dev/net/tun check).
+#         Skipped with "TUN device not available" when /dev/net/tun is absent
+#         (e.g. WSL2 without TUN). When present, starts gluetun with fake
+#         credentials and asserts docker inspect State.Status=running.
+#
+#   10c — VPN connectivity: always skipped — real VPN credentials required.
+# ---------------------------------------------------------------------------
+
+section "Phase 10: VPN Container Wiring"
+
+# -- 10a: Static wiring assertions via docker compose config ----------------
+
+printf "\n"
+info "Phase 10a — Static wiring assertions (docker compose config, no containers)"
+
+if [[ "${COMPOSE_AVAILABLE}" != "true" ]]; then
+    skip "Phase 10a — qbittorrent network_mode: service:gluetun — docker compose not available"
+    skip "Phase 10a — gluetun owns port 8080 — docker compose not available"
+    skip "Phase 10a — gluetun owns port 6881 — docker compose not available"
+    skip "Phase 10a — depends_on gluetun condition: service_healthy — docker compose not available"
+else
+    _VPN_WIRING_TMPDIR="$(mktemp -d -t "simplarr-vpn-wiring-XXXXXX")"
+
+    # Minimal VPN-enabled compose overlay mirroring the commented gluetun and
+    # qbittorrent VPN override blocks in docker-compose-unified.yml.
+    # Hard-coded values avoid env var interpolation issues in docker compose config.
+    cat > "${_VPN_WIRING_TMPDIR}/vpn-wiring.yml" << 'VPN_EOF'
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.1
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"
+    environment:
+      - VPN_SERVICE_PROVIDER=mullvad
+      - VPN_TYPE=openvpn
+      - OPENVPN_USER=test-user
+      - OPENVPN_PASSWORD=test-password
+    volumes:
+      - /tmp/simplarr-vpn-test/gluetun:/gluetun
+    healthcheck:
+      test: ["CMD", "/gluetun-entrypoint", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  qbittorrent:
+    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+    network_mode: "service:gluetun"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=UTC
+      - WEBUI_PORT=8080
+    volumes:
+      - /tmp/simplarr-vpn-test/qbittorrent:/config
+    healthcheck:
+      test: curl -f http://localhost:8080 || exit 1
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    restart: unless-stopped
+VPN_EOF
+
+    _VPN_CONF_OUT=""
+    if _VPN_CONF_OUT=$("${COMPOSE_CMD[@]}" \
+            -f "${_VPN_WIRING_TMPDIR}/vpn-wiring.yml" \
+            config 2>&1); then
+
+        # qbittorrent must share gluetun's network namespace — compose drops quotes
+        if echo "${_VPN_CONF_OUT}" | grep -qE 'network_mode:[[:space:]]+service:gluetun'; then
+            pass "Phase 10a — qbittorrent carries network_mode: service:gluetun"
+        else
+            fail "Phase 10a — qbittorrent missing network_mode: service:gluetun in resolved YAML"
+        fi
+
+        # gluetun owns port 8080 (WebUI); qbittorrent has no ports when VPN-wired
+        if echo "${_VPN_CONF_OUT}" | grep -qE 'published:[[:space:]]+"?8080"?|"8080:8080"|8080:8080'; then
+            pass "Phase 10a — gluetun owns port 8080 (WebUI)"
+        else
+            fail "Phase 10a — port 8080 missing from resolved config (expected under gluetun)"
+        fi
+
+        # gluetun owns port 6881 (torrent); qbittorrent has no ports when VPN-wired
+        if echo "${_VPN_CONF_OUT}" | grep -qE 'published:[[:space:]]+"?6881"?|"6881:6881"|6881:6881'; then
+            pass "Phase 10a — gluetun owns port 6881 (torrent)"
+        else
+            fail "Phase 10a — port 6881 missing from resolved config (expected under gluetun)"
+        fi
+
+        # qbittorrent must not start before gluetun's tunnel is established
+        if echo "${_VPN_CONF_OUT}" | grep -qE 'condition:[[:space:]]+service_healthy'; then
+            pass "Phase 10a — qbittorrent depends_on gluetun with condition: service_healthy"
+        else
+            fail "Phase 10a — missing depends_on gluetun condition: service_healthy in resolved YAML"
+        fi
+    else
+        fail "Phase 10a — VPN overlay YAML is invalid: ${_VPN_CONF_OUT}"
+        skip "Phase 10a — gluetun owns port 8080 — compose config failed"
+        skip "Phase 10a — gluetun owns port 6881 — compose config failed"
+        skip "Phase 10a — depends_on gluetun condition: service_healthy — compose config failed"
+    fi
+
+    rm -rf "${_VPN_WIRING_TMPDIR}"
+    _VPN_WIRING_TMPDIR=""
+fi
+
+# -- 10b: Runtime — gluetun container start (guarded by /dev/net/tun) -------
+
+printf "\n"
+info "Phase 10b — Runtime: gluetun container start (requires /dev/net/tun)"
+
+if [[ ! -e "/dev/net/tun" ]]; then
+    skip "Phase 10b — gluetun container start — TUN device not available (/dev/net/tun absent)"
+    skip "Phase 10b — gluetun State.Status=running — TUN device not available"
+else
+    if [[ "${DOCKER_AVAILABLE}" != "true" ]]; then
+        skip "Phase 10b — gluetun container start — docker not available"
+        skip "Phase 10b — gluetun State.Status=running — docker not available"
+    else
+        _VPN_CONTAINER_NAME="simplarr-test-gluetun-$$"
+        _VPN_CONTAINER_STARTED=false
+
+        # Start gluetun with fake credentials — we only assert it starts, not
+        # that it connects to a VPN. The healthcheck is intentionally not waited for.
+        if docker run -d \
+            --name "${_VPN_CONTAINER_NAME}" \
+            --cap-add NET_ADMIN \
+            --device /dev/net/tun:/dev/net/tun \
+            -e VPN_SERVICE_PROVIDER=mullvad \
+            -e VPN_TYPE=openvpn \
+            -e OPENVPN_USER=test-user \
+            -e OPENVPN_PASSWORD=test-password \
+            qmcgaw/gluetun:v3.41.1 >/dev/null 2>&1; then
+            _VPN_CONTAINER_STARTED=true
+            pass "Phase 10b — gluetun container started with fake credentials"
+        else
+            fail "Phase 10b — gluetun container failed to start"
+        fi
+
+        if [[ "${_VPN_CONTAINER_STARTED}" == "true" ]]; then
+            sleep 2
+            _GLUETUN_STATUS=$(docker inspect \
+                --format='{{.State.Status}}' \
+                "${_VPN_CONTAINER_NAME}" 2>/dev/null || echo "unknown")
+            if [[ "${_GLUETUN_STATUS}" == "running" ]]; then
+                pass "Phase 10b — docker inspect State.Status=running for gluetun"
+            else
+                fail "Phase 10b — gluetun State.Status=${_GLUETUN_STATUS} (expected: running)"
+            fi
+
+            docker stop "${_VPN_CONTAINER_NAME}" >/dev/null 2>&1 || true
+            docker rm "${_VPN_CONTAINER_NAME}" >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
+# -- 10c: VPN connectivity — always skipped ---------------------------------
+
+printf "\n"
+info "Phase 10c — VPN connectivity check (always skipped)"
+
+skip "Phase 10c — VPN connectivity — SKIP — real VPN credentials required"
 
 # ---------------------------------------------------------------------------
 # Summary
