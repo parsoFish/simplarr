@@ -587,6 +587,86 @@ if ($statusContent -match "fetch" -and $statusContent -match "status") {
     Write-Fail "status.html may be missing health check logic"
 }
 
+# -- Homepage fetch architecture tests (static, no Docker required) ----------
+
+Write-Test "Checking config.json.template has apiPaths key..."
+$templateContent = Get-Content -Raw "homepage/config.json.template"
+if ($templateContent -match '"apiPaths"') {
+    Write-Pass "config.json.template contains apiPaths key"
+} else {
+    Write-Fail "config.json.template missing apiPaths key (new architecture requirement)"
+}
+
+Write-Test "Checking config.json.template has healthPaths key..."
+if ($templateContent -match '"healthPaths"') {
+    Write-Pass "config.json.template contains healthPaths key"
+} else {
+    Write-Fail "config.json.template missing healthPaths key (new architecture requirement)"
+}
+
+Write-Test "Checking config.json.template apiPaths and healthPaths cover all 7 services..."
+$archServiceIds = @("plex", "radarr", "sonarr", "prowlarr", "overseerr", "qbittorrent", "tautulli")
+$missingFromArchPaths = @()
+foreach ($id in $archServiceIds) {
+    # Each service must appear at least 3 times: port key + apiPaths entry + healthPaths entry
+    $matchCount = ([regex]::Matches($templateContent, [regex]::Escape("`"$id`""))).Count
+    if ($matchCount -lt 3) {
+        $missingFromArchPaths += $id
+    }
+}
+if ($missingFromArchPaths.Count -eq 0) {
+    Write-Pass "config.json.template apiPaths and healthPaths cover all 7 services"
+} else {
+    Write-Fail "config.json.template missing services from apiPaths/healthPaths: $($missingFromArchPaths -join ', ')"
+}
+
+Write-Test "Checking homepage/js/status.js does not use no-cors fetch mode..."
+$statusJsContent = Get-Content -Raw "homepage/js/status.js"
+if ($statusJsContent -notmatch 'no-cors') {
+    Write-Pass "status.js does not use no-cors fetch mode"
+} else {
+    Write-Fail "status.js uses no-cors fetch mode — architecture requires standard CORS requests via nginx proxy"
+}
+
+Write-Test "Checking homepage/js/status.js does not use HEAD request method..."
+if ($statusJsContent -notmatch "method:\s*['""]HEAD") {
+    Write-Pass "status.js does not use HEAD request method"
+} else {
+    Write-Fail "status.js uses HEAD method — architecture requires GET requests to dedicated health endpoints"
+}
+
+Write-Test "Checking homepage/js/services.js exists..."
+if (Test-Path "homepage/js/services.js") {
+    Write-Pass "homepage/js/services.js exists"
+} else {
+    Write-Fail "homepage/js/services.js is missing (required by new fetch architecture)"
+}
+
+Write-Test "Checking homepage/js/services.js contains all 7 service IDs..."
+if (Test-Path "homepage/js/services.js") {
+    $servicesJsContent = Get-Content -Raw "homepage/js/services.js"
+    $missingFromServicesJs = @()
+    foreach ($id in $archServiceIds) {
+        if ($servicesJsContent -notmatch "'$id'" -and $servicesJsContent -notmatch "`"$id`"") {
+            $missingFromServicesJs += $id
+        }
+    }
+    if ($missingFromServicesJs.Count -eq 0) {
+        Write-Pass "services.js contains all 7 service IDs"
+    } else {
+        Write-Fail "services.js missing service IDs: $($missingFromServicesJs -join ', ')"
+    }
+} else {
+    Write-Fail "services.js not found — cannot verify service ID coverage"
+}
+
+Write-Test "Checking homepage/js/status.js has no port-based absolute URL construction..."
+if ($statusJsContent -notmatch ':\d{4,5}/') {
+    Write-Pass "status.js uses relative health check paths (no port-based URLs)"
+} else {
+    Write-Fail "status.js constructs port-based absolute URLs — use relative paths instead"
+}
+
 # =============================================================================
 # Overseerr OAuth Detection Tests (Phase 9 — unit-level, mock config files)
 # These tests run in both quick and full mode since they use mock files,

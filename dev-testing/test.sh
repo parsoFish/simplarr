@@ -718,6 +718,94 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Phase 7.5: Homepage Architecture Tests (static, no Docker required)
+# ---------------------------------------------------------------------------
+
+section "Phase 7.5: Homepage Architecture Tests"
+
+_TEMPLATE_FILE="${PROJECT_ROOT}/homepage/config.json.template"
+_STATUS_JS="${PROJECT_ROOT}/homepage/js/status.js"
+_SERVICES_JS="${PROJECT_ROOT}/homepage/js/services.js"
+
+printf "\n"
+info "config.json.template — new architecture keys"
+
+# (1) config.json.template has apiPaths key
+if grep -q '"apiPaths"' "${_TEMPLATE_FILE}"; then
+    pass "config.json.template contains apiPaths key"
+else
+    fail "config.json.template missing apiPaths key (new architecture requirement)"
+fi
+
+# (1) config.json.template has healthPaths key
+if grep -q '"healthPaths"' "${_TEMPLATE_FILE}"; then
+    pass "config.json.template contains healthPaths key"
+else
+    fail "config.json.template missing healthPaths key (new architecture requirement)"
+fi
+
+# (1) apiPaths and healthPaths cover all 7 services
+# Each service ID must appear at least 3 times: port key + apiPaths entry + healthPaths entry
+printf "\n"
+info "config.json.template — service coverage in apiPaths and healthPaths"
+
+declare -a _ARCH_SERVICE_IDS=("plex" "radarr" "sonarr" "prowlarr" "overseerr" "qbittorrent" "tautulli")
+
+for _svc_id in "${_ARCH_SERVICE_IDS[@]}"; do
+    _count=$(grep -o "\"${_svc_id}\"" "${_TEMPLATE_FILE}" 2>/dev/null | wc -l)
+    if [[ "${_count}" -ge 3 ]]; then
+        pass "config.json.template — \"${_svc_id}\" appears in apiPaths and healthPaths"
+    else
+        fail "config.json.template — \"${_svc_id}\" missing from apiPaths or healthPaths (found ${_count} occurrence(s), need >= 3)"
+    fi
+done
+
+# (2) status.js does not contain 'no-cors' or 'method: HEAD'
+# (4) status.js has no port-based URL construction
+printf "\n"
+info "status.js — architecture compliance"
+
+if [[ -f "${_STATUS_JS}" ]]; then
+    if ! grep -q 'no-cors' "${_STATUS_JS}"; then
+        pass "status.js does not use no-cors fetch mode"
+    else
+        fail "status.js uses no-cors fetch mode — architecture requires standard CORS requests via nginx proxy"
+    fi
+
+    if ! grep -qE "method:\s*['\"]HEAD" "${_STATUS_JS}"; then
+        pass "status.js does not use HEAD request method"
+    else
+        fail "status.js uses HEAD method — architecture requires GET requests to dedicated health endpoints"
+    fi
+
+    if ! grep -qE ':[0-9]{4,5}/' "${_STATUS_JS}"; then
+        pass "status.js uses relative health check paths (no port-based URLs)"
+    else
+        fail "status.js constructs port-based absolute URLs — use relative paths instead"
+    fi
+else
+    fail "homepage/js/status.js not found — cannot run architecture compliance checks"
+fi
+
+# (3) services.js exists and contains all 7 service IDs
+printf "\n"
+info "services.js — existence and service coverage"
+
+if [[ -f "${_SERVICES_JS}" ]]; then
+    pass "homepage/js/services.js exists"
+
+    for _svc_id in "${_ARCH_SERVICE_IDS[@]}"; do
+        if grep -qE "'${_svc_id}'|\"${_svc_id}\"" "${_SERVICES_JS}"; then
+            pass "services.js contains service ID '${_svc_id}'"
+        else
+            fail "services.js missing service ID '${_svc_id}'"
+        fi
+    done
+else
+    fail "homepage/js/services.js is missing (required by new fetch architecture)"
+fi
+
+# ---------------------------------------------------------------------------
 # Phase 8: Container Startup
 # ---------------------------------------------------------------------------
 
