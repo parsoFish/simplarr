@@ -1,74 +1,47 @@
-// Get current hostname for building URLs
-const host = window.location.hostname;
-const protocol = window.location.protocol;
+import { services } from './services.js';
 
-const defaultPorts = {
-  plex: 32400,
-  overseerr: 5055,
-  radarr: 7878,
-  sonarr: 8989,
-  prowlarr: 9696,
-  qbittorrent: 8080,
-  tautulli: 8181
-};
-
-function buildServices(ports) {
-  return [
-    { id: 'plex', url: `${protocol}//${host}:${ports.plex}/identity`, timeout: 5000 },
-    { id: 'radarr', url: `${protocol}//${host}:${ports.radarr}/ping`, timeout: 3000 },
-    { id: 'sonarr', url: `${protocol}//${host}:${ports.sonarr}/ping`, timeout: 3000 },
-    { id: 'prowlarr', url: `${protocol}//${host}:${ports.prowlarr}/ping`, timeout: 3000 },
-    { id: 'overseerr', url: `${protocol}//${host}:${ports.overseerr}/api/v1/status`, timeout: 3000 },
-    { id: 'qbittorrent', url: `${protocol}//${host}:${ports.qbittorrent}/`, timeout: 3000 },
-    { id: 'tautulli', url: `${protocol}//${host}:${ports.tautulli}/status`, timeout: 3000 }
-  ];
-}
-
-let services = buildServices(defaultPorts);
-
-async function checkService(service) {
+/**
+ * Check a single service and update its status DOM element.
+ *
+ * Uses a same-origin GET request so the HTTP status is readable via response.ok.
+ * A 500 sets "Unhealthy", not "Online".
+ * Network errors and AbortController timeouts set "Offline".
+ */
+export async function checkService(service) {
   const el = document.getElementById(`status-${service.id}`);
-  try {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), service.timeout);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), service.timeout);
 
-    await fetch(service.url, {
-      method: 'HEAD',
-      signal: controller.signal,
-      mode: 'no-cors'
-    });
+  try {
+    const response = await fetch(service.url, { signal: controller.signal });
     clearTimeout(timeoutId);
 
-    // no-cors means we can't read status, but if we get here without error, service responded
-    el.textContent = 'Online';
-    el.className = 'status up';
+    if (response.ok) {
+      el.textContent = 'Online';
+      el.className = 'status up';
+    } else {
+      el.textContent = 'Unhealthy';
+      el.className = 'status down';
+    }
   } catch {
+    clearTimeout(timeoutId);
     el.textContent = 'Offline';
     el.className = 'status down';
   }
 }
 
 async function checkAll() {
-  document.getElementById('last-check').textContent = new Date().toLocaleTimeString();
-  for (const service of services) {
-    checkService(service);
+  const lastCheck = document.getElementById('last-check');
+  if (lastCheck) {
+    lastCheck.textContent = new Date().toLocaleTimeString();
   }
+  await Promise.all(services.map(checkService));
 }
 
-fetch('/config.json')
-  .then(function (r) { return r.json(); })
-  .then(function (config) {
-    services = buildServices({
-      plex: config.plex || defaultPorts.plex,
-      overseerr: config.overseerr || defaultPorts.overseerr,
-      radarr: config.radarr || defaultPorts.radarr,
-      sonarr: config.sonarr || defaultPorts.sonarr,
-      prowlarr: config.prowlarr || defaultPorts.prowlarr,
-      qbittorrent: config.qbittorrent || defaultPorts.qbittorrent,
-      tautulli: config.tautulli || defaultPorts.tautulli
-    });
-    checkAll();
-  })
-  .catch(function () {
-    checkAll();
-  });
+// DOMContentLoaded fires after deferred modules execute in a real browser but
+// has already fired in a jsdom test environment, so this block is a no-op
+// during tests and prevents fetch calls from interfering with mock assertions.
+document.addEventListener('DOMContentLoaded', () => {
+  checkAll();
+  setInterval(checkAll, 30000);
+});
