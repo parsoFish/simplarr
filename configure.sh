@@ -31,9 +31,11 @@ QBITTORRENT_URL="${QBITTORRENT_URL:-http://localhost:8080}"
 OVERSEERR_URL="${OVERSEERR_URL:-http://localhost:5055}"
 TAUTULLI_URL="${TAUTULLI_URL:-http://localhost:8181}"
 
-# Service ports — override to match custom Docker port mappings
+# Service ports — single source of truth; referenced in API payloads below
 RADARR_PORT="${RADARR_PORT:-7878}"
 SONARR_PORT="${SONARR_PORT:-8989}"
+PROWLARR_PORT="${PROWLARR_PORT:-9696}"
+QBITTORRENT_PORT="${QBITTORRENT_PORT:-8080}"
 
 # Retry configuration for wait_for_service
 WAIT_MAX_ATTEMPTS="${WAIT_MAX_ATTEMPTS:-30}"
@@ -212,7 +214,7 @@ add_qbittorrent_download_client() {
                 \"name\": \"qBittorrent\",
                 \"fields\": [
                     {\"name\": \"host\", \"value\": \"${QBITTORRENT_HOST}\"},
-                    {\"name\": \"port\", \"value\": 8080},
+                    {\"name\": \"port\", \"value\": ${QBITTORRENT_PORT}},
                     {\"name\": \"useSsl\", \"value\": false},
                     {\"name\": \"urlBase\", \"value\": \"\"},
                     {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
@@ -290,8 +292,8 @@ add_radarr_to_prowlarr() {
             \"syncLevel\": \"fullSync\",
             \"name\": \"Radarr\",
             \"fields\": [
-                {\"name\": \"prowlarrUrl\", \"value\": \"http://${PROWLARR_HOST}:9696\"},
-                {\"name\": \"baseUrl\", \"value\": \"http://${RADARR_HOST}:7878\"},
+                {\"name\": \"prowlarrUrl\", \"value\": \"http://${PROWLARR_HOST}:${PROWLARR_PORT}\"},
+                {\"name\": \"baseUrl\", \"value\": \"http://${RADARR_HOST}:${RADARR_PORT}\"},
                 {\"name\": \"apiKey\", \"value\": \"${radarr_key}\"},
                 {\"name\": \"syncCategories\", \"value\": [2000, 2010, 2020, 2030, 2040, 2045, 2050, 2060, 2070, 2080]}
             ],
@@ -334,8 +336,8 @@ add_sonarr_to_prowlarr() {
             \"syncLevel\": \"fullSync\",
             \"name\": \"Sonarr\",
             \"fields\": [
-                {\"name\": \"prowlarrUrl\", \"value\": \"http://${PROWLARR_HOST}:9696\"},
-                {\"name\": \"baseUrl\", \"value\": \"http://${SONARR_HOST}:8989\"},
+                {\"name\": \"prowlarrUrl\", \"value\": \"http://${PROWLARR_HOST}:${PROWLARR_PORT}\"},
+                {\"name\": \"baseUrl\", \"value\": \"http://${SONARR_HOST}:${SONARR_PORT}\"},
                 {\"name\": \"apiKey\", \"value\": \"${sonarr_key}\"},
                 {\"name\": \"syncCategories\", \"value\": [5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060, 5070, 5080]}
             ],

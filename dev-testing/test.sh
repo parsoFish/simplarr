@@ -5,7 +5,8 @@
 # Self-contained test runner covering preflight, file existence, syntax
 # validation, nginx config content checks, qBittorrent template validation,
 # setup script validation, configure script validation, container startup,
-# live service connectivity, full API service wiring, VPN wiring, and wiring verification.
+# live service connectivity, full API service wiring, VPN wiring, wiring verification,
+# and port literal guard assertions.
 #
 # Usage:
 #   ./dev-testing/test.sh
@@ -33,7 +34,7 @@
 #   7  Configure     — configure.sh/configure.ps1 API function presence
 #   8  Container     — Spin up isolated stack; verify all health checks pass
 #   9  Connectivity  — Health endpoints, config.xml creation, get_arr_api_key
-#  10  Wiring        — qBit password, root folders, download clients, Prowlarr apps/indexers/sync, VPN wiring, verification
+#  10  Wiring        — qBit password, root folders, download clients, Prowlarr, VPN, verification, port guard
 # =============================================================================
 
 set -uo pipefail
@@ -1994,6 +1995,75 @@ printf "\n"
 info "Phase 10c — VPN connectivity check (always skipped)"
 
 skip "Phase 10c — VPN connectivity — SKIP — real VPN credentials required"
+
+# ---------------------------------------------------------------------------
+# Phase 11: Port Literal Guard
+# ---------------------------------------------------------------------------
+#
+# Verify that configure.sh and configure.ps1 contain no stray hardcoded port
+# literals outside their single-source-of-truth variable default-value lines.
+#
+# Acceptable — single-source-of-truth declarations:
+#   configure.sh:  RADARR_URL="${RADARR_URL:-http://localhost:7878}"  (${VAR:-default})
+#   configure.ps1: [string]$RadarrUrl = "http://localhost:7878"       ([type]$Param = val)
+#
+# Stray — port hardcoded outside a default declaration (must not exist):
+#   {"name": "port", "value": 7878}
+#   "http://${RADARR_HOST}:7878/api/..."
+#
+# Ports guarded: 7878 (Radarr), 8989 (Sonarr), 9696 (Prowlarr),
+#                8080 (qBittorrent), 5055 (Overseerr), 8181 (Tautulli),
+#                32400 (Plex)
+
+section "Phase 11: Port Literal Guard"
+
+_PORT_PATTERN="(7878|8989|9696|8080|5055|8181|32400)"
+
+printf "\n"
+info "Port literal guard — configure.sh"
+
+if [[ -f "${PROJECT_ROOT}/configure.sh" ]]; then
+    # Grep for port literals; exclude bash variable default-value lines.
+    # Lines using the ${VAR:-value} substitution syntax are intentional
+    # single-source-of-truth declarations and are exempt from this guard.
+    _STRAY_SH=$(grep -En "${_PORT_PATTERN}" "${PROJECT_ROOT}/configure.sh" \
+        | grep -vE '\$\{[A-Z_]+:-' || true)
+
+    if [[ -z "${_STRAY_SH}" ]]; then
+        pass "configure.sh — no stray port literals outside variable default-value lines"
+    else
+        _STRAY_SH_COUNT=$(echo "${_STRAY_SH}" | grep -c . || true)
+        fail "configure.sh — ${_STRAY_SH_COUNT} stray port literal(s) found outside variable default-value lines:"
+        while IFS= read -r _stray_line; do
+            info "  ${_stray_line}"
+        done <<< "${_STRAY_SH}"
+    fi
+else
+    fail "configure.sh not found — cannot run port literal guard"
+fi
+
+printf "\n"
+info "Port literal guard — configure.ps1"
+
+if [[ -f "${PROJECT_ROOT}/configure.ps1" ]]; then
+    # Grep for port literals; exclude PowerShell parameter default-value
+    # declarations. Lines matching [type]$Name = value are intentional
+    # single-source-of-truth declarations and are exempt from this guard.
+    _STRAY_PS1=$(grep -En "${_PORT_PATTERN}" "${PROJECT_ROOT}/configure.ps1" \
+        | grep -vE '\[(string|int|bool)\]\$' || true)
+
+    if [[ -z "${_STRAY_PS1}" ]]; then
+        pass "configure.ps1 — no stray port literals outside parameter default-value declarations"
+    else
+        _STRAY_PS1_COUNT=$(echo "${_STRAY_PS1}" | grep -c . || true)
+        fail "configure.ps1 — ${_STRAY_PS1_COUNT} stray port literal(s) found outside parameter default-value declarations:"
+        while IFS= read -r _stray_line; do
+            info "  ${_stray_line}"
+        done <<< "${_STRAY_PS1}"
+    fi
+else
+    fail "configure.ps1 not found — cannot run port literal guard"
+fi
 
 # ---------------------------------------------------------------------------
 # Summary
