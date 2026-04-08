@@ -49,6 +49,16 @@ DOWNLOADS_PATH="${DOWNLOADS_PATH:-/downloads}"
 QB_USERNAME="${QB_USERNAME:-admin}"
 QB_PASSWORD="${QB_PASSWORD:-}"
 
+# Prowlarr public indexer definitions — each entry encodes name|base_url|definition_name|impl_name.
+# Adding a new indexer requires only a new data entry here; no changes to add_public_indexers().
+INDEXER_DEFINITIONS=(
+    "YTS|https://yts.mx|yts|YTS"                                          # definitionName: "yts"
+    "The Pirate Bay|https://thepiratebay.org|thepiratebay|The Pirate Bay" # definitionName: "thepiratebay"
+    "TorrentGalaxy|https://torrentgalaxy.to|torrentgalaxy|TorrentGalaxy"  # definitionName: "torrentgalaxy"
+    "Nyaa|https://nyaa.si|nyaasi|Nyaa.si"                                 # definitionName: "nyaasi"
+    "LimeTorrents|https://www.limetorrents.lol|limetorrents|LimeTorrents" # definitionName: "limetorrents"
+)
+
 echo -e "${BLUE}"
 echo "╔═══════════════════════════════════════════════════════════════════════╗"
 echo "║                    Simplarr Configuration Script                       ║"
@@ -392,40 +402,10 @@ add_public_indexers() {
     log_info "Adding public indexers to Prowlarr..."
     log_info "Note: Some indexers may fail due to geo-blocking or Cloudflare protection"
 
-    # Parallel arrays — each index represents one indexer.
-    # impl_name differs from name only for Nyaa (Prowlarr uses "Nyaa.si" internally).
-    local -a names=(
-        "YTS"
-        "The Pirate Bay"
-        "TorrentGalaxy"
-        "Nyaa"
-        "LimeTorrents"
-    )
-    local -a base_urls=(
-        "https://yts.mx"
-        "https://thepiratebay.org"
-        "https://torrentgalaxy.to"
-        "https://nyaa.si"
-        "https://www.limetorrents.lol"
-    )
-    local -a def_names=(
-        "yts"
-        "thepiratebay"
-        "torrentgalaxy"
-        "nyaasi"
-        "limetorrents"
-    )
-    local -a impl_names=(
-        "YTS"
-        "The Pirate Bay"
-        "TorrentGalaxy"
-        "Nyaa.si"
-        "LimeTorrents"
-    )
-
-    local i
-    for i in "${!names[@]}"; do
-        add_indexer "${api_key}" "${names[$i]}" "${base_urls[$i]}" "${def_names[$i]}" "${impl_names[$i]}"
+    local entry name base_url def_name impl_name
+    for entry in "${INDEXER_DEFINITIONS[@]}"; do
+        IFS='|' read -r name base_url def_name impl_name <<< "${entry}"
+        add_indexer "${api_key}" "${name}" "${base_url}" "${def_name}" "${impl_name}"
     done
 }
 
