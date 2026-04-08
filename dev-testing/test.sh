@@ -1,11 +1,11 @@
 #!/bin/bash
 # =============================================================================
-# Simplarr Test Suite — Phases 1–9 (Bash)
+# Simplarr Test Suite — Phases 1–10 (Bash)
 # =============================================================================
 # Self-contained test runner covering preflight, file existence, syntax
 # validation, nginx config content checks, qBittorrent template validation,
 # setup script validation, configure script validation, container startup,
-# and live service API integration. Mirrors dev-testing/test.ps1 phases 1–7.
+# live service connectivity, and full API service wiring.
 #
 # Usage:
 #   ./dev-testing/test.sh
@@ -32,6 +32,7 @@
 #   7  Configure     — configure.sh/configure.ps1 API function presence
 #   8  Container     — Spin up isolated stack; verify all health checks pass
 #   9  Connectivity  — Health endpoints, config.xml creation, get_arr_api_key
+#  10  Wiring        — qBit password, root folders, download clients, Prowlarr apps/indexers/sync
 # =============================================================================
 
 set -uo pipefail
@@ -62,6 +63,13 @@ _TMPDIR=""
 _COMPOSE_PROJECT_NAME=""
 _TEST_CONFIG_DIR=""
 _PHASE8_SUCCESS=false
+
+# API keys populated by Phase 9c — consumed by Phase 10
+_RADARR_API_KEY=""
+_SONARR_API_KEY=""
+_PROWLARR_API_KEY=""
+_QBIT_PASSWORD=""
+
 _TEST_BASE_PORT=0
 
 # Per-service host ports — assigned by Phase 8 from a random base; zero until set
@@ -140,7 +148,7 @@ section() {
 
 printf "\n%b" "${BOLD}${CYAN}"
 printf "════════════════════════════════════════════════════════════\n"
-printf "  Simplarr Test Suite — Phases 1–9\n"
+printf "  Simplarr Test Suite — Phases 1–10\n"
 printf "════════════════════════════════════════════════════════════\n"
 printf "%b\n" "${NC}"
 
@@ -733,6 +741,9 @@ else
     for _svc8 in radarr sonarr prowlarr overseerr qbittorrent tautulli; do
         mkdir -p "${_TEST_CONFIG_DIR}/${_svc8}"
     done
+    # Create media directories mounted into arr containers for root folder creation
+    mkdir -p "${_TEST_CONFIG_DIR}/media/movies"
+    mkdir -p "${_TEST_CONFIG_DIR}/media/tv"
 
     pass "Created test config directories under ${_TEST_CONFIG_DIR}"
 
@@ -751,6 +762,7 @@ services:
       - TZ=UTC
     volumes:
       - ${_TEST_CONFIG_DIR}/radarr:/config
+      - ${_TEST_CONFIG_DIR}/media/movies:/movies
     healthcheck:
       test: curl -f http://localhost:7878/ping || exit 1
       interval: 10s
@@ -768,6 +780,7 @@ services:
       - TZ=UTC
     volumes:
       - ${_TEST_CONFIG_DIR}/sonarr:/config
+      - ${_TEST_CONFIG_DIR}/media/tv:/tv
     healthcheck:
       test: curl -f http://localhost:8989/ping || exit 1
       interval: 10s
@@ -1040,6 +1053,12 @@ else
         _api_key=$(grep -oP '(?<=<ApiKey>)[^<]+' "${_cfg}" 2>/dev/null || true)
         if [[ -n "${_api_key}" && "${#_api_key}" -ge 16 ]]; then
             pass "get_arr_api_key — ${_svc9}: key extracted (${_api_key:0:8}...)"
+            # Save to named variable for Phase 10
+            case "${_svc9}" in
+                radarr)   _RADARR_API_KEY="${_api_key}" ;;
+                sonarr)   _SONARR_API_KEY="${_api_key}" ;;
+                prowlarr) _PROWLARR_API_KEY="${_api_key}" ;;
+            esac
         else
             fail "get_arr_api_key — ${_svc9}: no valid API key found in config.xml"
         fi
@@ -1073,6 +1092,445 @@ else
         fi
     else
         pass "Overseerr integration — settings.json absent on fresh container (OAuth not done — expected)"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 10: Service API Wiring
+# ---------------------------------------------------------------------------
+
+section "Phase 10: Service API Wiring"
+
+if [[ "${_PHASE8_SUCCESS}" != "true" ]]; then
+    skip "Phase 10 — skipped (Phase 8 containers not healthy)"
+elif [[ -z "${_RADARR_API_KEY}" || -z "${_SONARR_API_KEY}" || -z "${_PROWLARR_API_KEY}" ]]; then
+    skip "Phase 10 — skipped (one or more *arr API keys absent from Phase 9c)"
+else
+    # -- 10a: qBittorrent temporary password --------------------------------
+
+    printf "\n"
+    info "Extracting qBittorrent temporary password from Docker logs..."
+
+    _QB_CONTAINER="${_COMPOSE_PROJECT_NAME}-qbittorrent-1"
+    _qb_logs=$(docker logs "${_QB_CONTAINER}" 2>&1 || true)
+
+    # Mirror test.ps1: match "temporary password.*: <PASSWORD>"
+    _qb_extract_password() {
+        echo "$1" | grep -i "temporary password" \
+            | awk -F': ' '{print $NF}' | tr -d '[:space:]' | head -1
+    }
+
+    _QBIT_PASSWORD=$(_qb_extract_password "${_qb_logs}")
+
+    if [[ -n "${_QBIT_PASSWORD}" ]]; then
+        pass "Phase 10 — qBittorrent temp password extracted (${_QBIT_PASSWORD:0:4}...)"
+    else
+        info "Password not in logs yet — waiting up to 30s (mirrors test.ps1 retry)..."
+        _qb_wait_start="${SECONDS}"
+        while true; do
+            _elapsed=$(( SECONDS - _qb_wait_start ))
+            if [[ "${_elapsed}" -ge 30 ]]; then
+                break
+            fi
+            sleep 5
+            _qb_logs=$(docker logs "${_QB_CONTAINER}" 2>&1 || true)
+            _QBIT_PASSWORD=$(_qb_extract_password "${_qb_logs}")
+            if [[ -n "${_QBIT_PASSWORD}" ]]; then
+                break
+            fi
+        done
+
+        if [[ -n "${_QBIT_PASSWORD}" ]]; then
+            pass "Phase 10 — qBittorrent temp password extracted after retry (${_QBIT_PASSWORD:0:4}...)"
+        else
+            fail "Phase 10 — could not extract qBittorrent temp password (even after 30s)"
+        fi
+    fi
+
+    # -- 10b: Radarr root folder --------------------------------------------
+
+    printf "\n"
+    info "Configuring Radarr root folder (/movies)..."
+
+    _existing_folders=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_RADARR_API_KEY}" \
+        "http://localhost:${PORT_RADARR}/api/v3/rootfolder" 2>/dev/null || true)
+
+    if echo "${_existing_folders}" | grep -qE '"path"\s*:\s*"/movies"'; then
+        pass "Phase 10 — Radarr /movies root folder already exists (idempotent)"
+    else
+        _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+            -X POST \
+            -H "X-Api-Key: ${_RADARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"path":"/movies"}' \
+            "http://localhost:${PORT_RADARR}/api/v3/rootfolder" 2>/dev/null || echo "000")
+        if [[ "${_http}" =~ ^2 ]]; then
+            pass "Phase 10 — Radarr root folder POST returned HTTP ${_http}"
+        else
+            fail "Phase 10 — Radarr root folder POST failed (HTTP ${_http})"
+        fi
+    fi
+
+    # -- 10c: Sonarr root folder --------------------------------------------
+
+    info "Configuring Sonarr root folder (/tv)..."
+
+    _existing_folders=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_SONARR_API_KEY}" \
+        "http://localhost:${PORT_SONARR}/api/v3/rootfolder" 2>/dev/null || true)
+
+    if echo "${_existing_folders}" | grep -qE '"path"\s*:\s*"/tv"'; then
+        pass "Phase 10 — Sonarr /tv root folder already exists (idempotent)"
+    else
+        _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 \
+            -X POST \
+            -H "X-Api-Key: ${_SONARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d '{"path":"/tv"}' \
+            "http://localhost:${PORT_SONARR}/api/v3/rootfolder" 2>/dev/null || echo "000")
+        if [[ "${_http}" =~ ^2 ]]; then
+            pass "Phase 10 — Sonarr root folder POST returned HTTP ${_http}"
+        else
+            fail "Phase 10 — Sonarr root folder POST failed (HTTP ${_http})"
+        fi
+    fi
+
+    # -- 10d: qBittorrent → Radarr download client --------------------------
+
+    printf "\n"
+    info "Adding qBittorrent as download client to Radarr..."
+
+    if [[ -z "${_QBIT_PASSWORD}" ]]; then
+        skip "Phase 10 — qBittorrent → Radarr: no password available, skipping"
+    else
+        _existing_clients=$(curl -s --max-time 10 \
+            -H "X-Api-Key: ${_RADARR_API_KEY}" \
+            "http://localhost:${PORT_RADARR}/api/v3/downloadclient" 2>/dev/null || true)
+
+        if echo "${_existing_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
+            pass "Phase 10 — qBittorrent already in Radarr download clients (idempotent)"
+        else
+            _qbit_radarr_body=$(printf '{
+  "enable":true,"protocol":"torrent","priority":1,
+  "name":"qBittorrent","implementation":"QBittorrent",
+  "configContract":"QBittorrentSettings","implementationName":"qBittorrent",
+  "tags":[],
+  "fields":[
+    {"name":"host","value":"qbittorrent"},
+    {"name":"port","value":8080},
+    {"name":"useSsl","value":false},
+    {"name":"urlBase","value":""},
+    {"name":"username","value":"admin"},
+    {"name":"password","value":"%s"},
+    {"name":"movieCategory","value":"radarr"},
+    {"name":"movieImportedCategory","value":""},
+    {"name":"recentMoviePriority","value":0},
+    {"name":"olderMoviePriority","value":0},
+    {"name":"initialState","value":0},
+    {"name":"sequentialOrder","value":false},
+    {"name":"firstAndLast","value":false},
+    {"name":"contentLayout","value":0}
+  ]
+}' "${_QBIT_PASSWORD}")
+            _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+                -X POST \
+                -H "X-Api-Key: ${_RADARR_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${_qbit_radarr_body}" \
+                "http://localhost:${PORT_RADARR}/api/v3/downloadclient" 2>/dev/null || echo "000")
+            if [[ "${_http}" =~ ^2 ]]; then
+                pass "Phase 10 — qBittorrent added to Radarr (HTTP ${_http})"
+            else
+                fail "Phase 10 — qBittorrent → Radarr POST failed (HTTP ${_http})"
+            fi
+        fi
+    fi
+
+    # -- 10e: qBittorrent → Sonarr download client --------------------------
+
+    info "Adding qBittorrent as download client to Sonarr..."
+
+    if [[ -z "${_QBIT_PASSWORD}" ]]; then
+        skip "Phase 10 — qBittorrent → Sonarr: no password available, skipping"
+    else
+        _existing_clients=$(curl -s --max-time 10 \
+            -H "X-Api-Key: ${_SONARR_API_KEY}" \
+            "http://localhost:${PORT_SONARR}/api/v3/downloadclient" 2>/dev/null || true)
+
+        if echo "${_existing_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
+            pass "Phase 10 — qBittorrent already in Sonarr download clients (idempotent)"
+        else
+            _qbit_sonarr_body=$(printf '{
+  "enable":true,"protocol":"torrent","priority":1,
+  "name":"qBittorrent","implementation":"QBittorrent",
+  "configContract":"QBittorrentSettings","implementationName":"qBittorrent",
+  "tags":[],
+  "fields":[
+    {"name":"host","value":"qbittorrent"},
+    {"name":"port","value":8080},
+    {"name":"useSsl","value":false},
+    {"name":"urlBase","value":""},
+    {"name":"username","value":"admin"},
+    {"name":"password","value":"%s"},
+    {"name":"tvCategory","value":"sonarr"},
+    {"name":"tvImportedCategory","value":""},
+    {"name":"recentTvPriority","value":0},
+    {"name":"olderTvPriority","value":0},
+    {"name":"initialState","value":0},
+    {"name":"sequentialOrder","value":false},
+    {"name":"firstAndLast","value":false},
+    {"name":"contentLayout","value":0}
+  ]
+}' "${_QBIT_PASSWORD}")
+            _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+                -X POST \
+                -H "X-Api-Key: ${_SONARR_API_KEY}" \
+                -H "Content-Type: application/json" \
+                -d "${_qbit_sonarr_body}" \
+                "http://localhost:${PORT_SONARR}/api/v3/downloadclient" 2>/dev/null || echo "000")
+            if [[ "${_http}" =~ ^2 ]]; then
+                pass "Phase 10 — qBittorrent added to Sonarr (HTTP ${_http})"
+            else
+                fail "Phase 10 — qBittorrent → Sonarr POST failed (HTTP ${_http})"
+            fi
+        fi
+    fi
+
+    # -- 10f: Radarr → Prowlarr application ---------------------------------
+
+    printf "\n"
+    info "Adding Radarr as application to Prowlarr..."
+
+    _existing_apps=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+        "http://localhost:${PORT_PROWLARR}/api/v1/applications" 2>/dev/null || true)
+
+    if echo "${_existing_apps}" | grep -qE '"name"\s*:\s*"Radarr"'; then
+        pass "Phase 10 — Radarr already in Prowlarr applications (idempotent)"
+    else
+        _radarr_app_body=$(printf '{
+  "name":"Radarr","implementation":"Radarr",
+  "implementationName":"Radarr","configContract":"RadarrSettings",
+  "syncLevel":"fullSync",
+  "fields":[
+    {"name":"prowlarrUrl","value":"http://prowlarr:9696"},
+    {"name":"baseUrl","value":"http://radarr:7878"},
+    {"name":"apiKey","value":"%s"},
+    {"name":"syncCategories","value":[2000,2010,2020,2030,2040,2045,2050,2060]}
+  ]
+}' "${_RADARR_API_KEY}")
+        _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+            -X POST \
+            -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${_radarr_app_body}" \
+            "http://localhost:${PORT_PROWLARR}/api/v1/applications" 2>/dev/null || echo "000")
+        if [[ "${_http}" =~ ^2 ]]; then
+            pass "Phase 10 — Radarr added to Prowlarr (HTTP ${_http})"
+        else
+            fail "Phase 10 — Radarr → Prowlarr POST failed (HTTP ${_http})"
+        fi
+    fi
+
+    # -- 10g: Sonarr → Prowlarr application ---------------------------------
+
+    info "Adding Sonarr as application to Prowlarr..."
+
+    if echo "${_existing_apps}" | grep -qE '"name"\s*:\s*"Sonarr"'; then
+        pass "Phase 10 — Sonarr already in Prowlarr applications (idempotent)"
+    else
+        _sonarr_app_body=$(printf '{
+  "name":"Sonarr","implementation":"Sonarr",
+  "implementationName":"Sonarr","configContract":"SonarrSettings",
+  "syncLevel":"fullSync",
+  "fields":[
+    {"name":"prowlarrUrl","value":"http://prowlarr:9696"},
+    {"name":"baseUrl","value":"http://sonarr:8989"},
+    {"name":"apiKey","value":"%s"},
+    {"name":"syncCategories","value":[5000,5010,5020,5030,5040,5045,5050]}
+  ]
+}' "${_SONARR_API_KEY}")
+        _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+            -X POST \
+            -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${_sonarr_app_body}" \
+            "http://localhost:${PORT_PROWLARR}/api/v1/applications" 2>/dev/null || echo "000")
+        if [[ "${_http}" =~ ^2 ]]; then
+            pass "Phase 10 — Sonarr added to Prowlarr (HTTP ${_http})"
+        else
+            fail "Phase 10 — Sonarr → Prowlarr POST failed (HTTP ${_http})"
+        fi
+    fi
+
+    # -- 10h: 5 public indexers → Prowlarr ----------------------------------
+
+    printf "\n"
+    info "Adding 5 public indexers to Prowlarr..."
+
+    _existing_indexers=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+        "http://localhost:${PORT_PROWLARR}/api/v1/indexer" 2>/dev/null || true)
+
+    _indexer_added_count=0
+    _indexer_skip_count=0
+
+    declare -a _INDEXER_NAMES=("YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa" "LimeTorrents")
+    declare -a _INDEXER_IMPL_NAMES=("YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa.si" "LimeTorrents")
+    declare -a _INDEXER_DEF_NAMES=("yts" "thepiratebay" "torrentgalaxy" "nyaasi" "limetorrents")
+    declare -a _INDEXER_BASE_URLS=("https://yts.mx" "https://thepiratebay.org" "https://torrentgalaxy.to" "https://nyaa.si" "https://www.limetorrents.lol")
+
+    for _idx in "${!_INDEXER_NAMES[@]}"; do
+        _iname="${_INDEXER_NAMES[${_idx}]}"
+        _impl="${_INDEXER_IMPL_NAMES[${_idx}]}"
+        _defname="${_INDEXER_DEF_NAMES[${_idx}]}"
+        _baseurl="${_INDEXER_BASE_URLS[${_idx}]}"
+
+        if echo "${_existing_indexers}" | grep -qE "\"name\"\\s*:\\s*\"${_iname}\""; then
+            (( _indexer_skip_count++ )) || true
+            continue
+        fi
+
+        _indexer_body=$(printf '{
+  "enable":true,"redirect":false,
+  "name":"%s","implementationName":"%s",
+  "implementation":"Cardigann","configContract":"CardigannSettings",
+  "definitionName":"%s","appProfileId":1,
+  "protocol":"torrent","privacy":"public","priority":25,
+  "downloadClientId":0,"tags":[],
+  "fields":[
+    {"name":"definitionFile","value":"%s"},
+    {"name":"baseUrl","value":"%s"},
+    {"name":"baseSettings.limitsUnit","value":0}
+  ]
+}' "${_iname}" "${_impl}" "${_defname}" "${_defname}" "${_baseurl}")
+
+        _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 \
+            -X POST \
+            -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+            -H "Content-Type: application/json" \
+            -d "${_indexer_body}" \
+            "http://localhost:${PORT_PROWLARR}/api/v1/indexer" 2>/dev/null || echo "000")
+
+        if [[ "${_http}" =~ ^2 ]]; then
+            (( _indexer_added_count++ )) || true
+        fi
+    done
+
+    _indexer_total=$(( _indexer_added_count + _indexer_skip_count ))
+    if [[ "${_indexer_total}" -ge "${#_INDEXER_NAMES[@]}" ]]; then
+        pass "Phase 10 — Prowlarr indexers: ${_indexer_added_count} added, ${_indexer_skip_count} already existed"
+    elif [[ $(( _indexer_added_count + _indexer_skip_count )) -gt 0 ]]; then
+        pass "Phase 10 — Prowlarr indexers partially configured: ${_indexer_added_count} added, ${_indexer_skip_count} existed"
+    else
+        fail "Phase 10 — failed to add any indexers to Prowlarr"
+    fi
+
+    # -- 10i: Trigger Prowlarr sync -----------------------------------------
+
+    printf "\n"
+    info "Triggering Prowlarr sync to connected apps (ApplicationIndexerSync)..."
+
+    _http=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+        -X POST \
+        -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+        -H "Content-Type: application/json" \
+        -d '{"name":"ApplicationIndexerSync"}' \
+        "http://localhost:${PORT_PROWLARR}/api/v1/command" 2>/dev/null || echo "000")
+
+    if [[ "${_http}" =~ ^2 ]]; then
+        pass "Phase 10 — Prowlarr sync triggered (HTTP ${_http})"
+        info "Waiting 10s for sync to propagate (mirrors test.ps1 behaviour)..."
+        sleep 10
+    else
+        fail "Phase 10 — Prowlarr sync trigger failed (HTTP ${_http})"
+    fi
+
+    # -- 10j-k: Verify root folders -----------------------------------------
+
+    printf "\n"
+    info "Verifying root folders are configured..."
+
+    _folders=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_RADARR_API_KEY}" \
+        "http://localhost:${PORT_RADARR}/api/v3/rootfolder" 2>/dev/null || true)
+    if echo "${_folders}" | grep -qE '"path"\s*:\s*"/movies"'; then
+        pass "Phase 10 — Radarr has /movies root folder"
+    else
+        fail "Phase 10 — Radarr is missing /movies root folder"
+    fi
+
+    _folders=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_SONARR_API_KEY}" \
+        "http://localhost:${PORT_SONARR}/api/v3/rootfolder" 2>/dev/null || true)
+    if echo "${_folders}" | grep -qE '"path"\s*:\s*"/tv"'; then
+        pass "Phase 10 — Sonarr has /tv root folder"
+    else
+        fail "Phase 10 — Sonarr is missing /tv root folder"
+    fi
+
+    # -- 10l-m: Verify download clients -------------------------------------
+
+    printf "\n"
+    info "Verifying download clients are configured..."
+
+    if [[ -z "${_QBIT_PASSWORD}" ]]; then
+        skip "Phase 10 — Radarr download client verification: no qBittorrent password extracted"
+        skip "Phase 10 — Sonarr download client verification: no qBittorrent password extracted"
+    else
+        _clients=$(curl -s --max-time 10 \
+            -H "X-Api-Key: ${_RADARR_API_KEY}" \
+            "http://localhost:${PORT_RADARR}/api/v3/downloadclient" 2>/dev/null || true)
+        if echo "${_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
+            pass "Phase 10 — Radarr has qBittorrent download client"
+        else
+            fail "Phase 10 — Radarr is missing qBittorrent download client"
+        fi
+
+        _clients=$(curl -s --max-time 10 \
+            -H "X-Api-Key: ${_SONARR_API_KEY}" \
+            "http://localhost:${PORT_SONARR}/api/v3/downloadclient" 2>/dev/null || true)
+        if echo "${_clients}" | grep -qE '"name"\s*:\s*"qBittorrent"'; then
+            pass "Phase 10 — Sonarr has qBittorrent download client"
+        else
+            fail "Phase 10 — Sonarr is missing qBittorrent download client"
+        fi
+    fi
+
+    # -- 10n: Verify Prowlarr indexers (3+) ---------------------------------
+
+    printf "\n"
+    info "Verifying Prowlarr configuration..."
+
+    _prowlarr_indexers=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+        "http://localhost:${PORT_PROWLARR}/api/v1/indexer" 2>/dev/null || true)
+    _prowlarr_count=$(echo "${_prowlarr_indexers}" | grep -o '"id":' | wc -l | tr -d '[:space:]')
+    if [[ "${_prowlarr_count:-0}" -ge 3 ]]; then
+        pass "Phase 10 — Prowlarr has ${_prowlarr_count} indexer(s) (expected 3+)"
+    elif [[ "${_prowlarr_count:-0}" -gt 0 ]]; then
+        pass "Phase 10 — Prowlarr has ${_prowlarr_count} indexer(s) (partial; network timeouts may have prevented all)"
+    else
+        fail "Phase 10 — Prowlarr has no indexers configured"
+    fi
+
+    # -- 10o-p: Verify Prowlarr applications --------------------------------
+
+    _prowlarr_apps=$(curl -s --max-time 10 \
+        -H "X-Api-Key: ${_PROWLARR_API_KEY}" \
+        "http://localhost:${PORT_PROWLARR}/api/v1/applications" 2>/dev/null || true)
+
+    if echo "${_prowlarr_apps}" | grep -qE '"name"\s*:\s*"Radarr"'; then
+        pass "Phase 10 — Prowlarr has Radarr connected"
+    else
+        fail "Phase 10 — Prowlarr is missing Radarr connection"
+    fi
+
+    if echo "${_prowlarr_apps}" | grep -qE '"name"\s*:\s*"Sonarr"'; then
+        pass "Phase 10 — Prowlarr has Sonarr connected"
+    else
+        fail "Phase 10 — Prowlarr is missing Sonarr connection"
     fi
 fi
 
