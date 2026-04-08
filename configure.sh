@@ -185,39 +185,58 @@ add_qbittorrent_download_client() {
     # e.g. movieCategory → movieImportedCategory, tvCategory → tvImportedCategory
     local imported_category_field="${category_field/Category/ImportedCategory}"
 
-    local response
-    response=$(curl -s -X POST "${service_url}/api/v3/downloadclient" \
-        -H "X-Api-Key: ${api_key}" \
-        -H "Content-Type: application/json" \
-        -d "{
-            \"enable\": true,
-            \"protocol\": \"torrent\",
-            \"priority\": 1,
-            \"removeCompletedDownloads\": true,
-            \"removeFailedDownloads\": true,
-            \"name\": \"qBittorrent\",
-            \"fields\": [
-                {\"name\": \"host\", \"value\": \"${QBITTORRENT_HOST}\"},
-                {\"name\": \"port\", \"value\": 8080},
-                {\"name\": \"useSsl\", \"value\": false},
-                {\"name\": \"urlBase\", \"value\": \"\"},
-                {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
-                {\"name\": \"password\", \"value\": \"${QB_PASSWORD}\"},
-                {\"name\": \"${category_field}\", \"value\": \"${category_value}\"},
-                {\"name\": \"${imported_category_field}\", \"value\": \"\"},
-                {\"name\": \"${recent_priority_field}\", \"value\": 0},
-                {\"name\": \"${older_priority_field}\", \"value\": 0},
-                {\"name\": \"initialState\", \"value\": 0},
-                {\"name\": \"sequentialOrder\", \"value\": false},
-                {\"name\": \"firstAndLast\", \"value\": false}
-            ],
-            \"implementationName\": \"qBittorrent\",
-            \"implementation\": \"QBittorrent\",
-            \"configContract\": \"QBittorrentSettings\",
-            \"tags\": []
-        }")
+    # GET-before-POST: skip if qBittorrent download client already configured
+    local existing
+    existing=$(curl -s "${service_url}/api/v3/downloadclient" \
+        -H "X-Api-Key: ${api_key}")
+    if echo "${existing}" | grep -q '"name" *: *"qBittorrent"'; then
+        log_info "qBittorrent already configured (skipping)"
+        return 0
+    fi
 
-    if echo "$response" | grep -q '"id"'; then
+    # *arr services validate the qBittorrent connection on POST and return HTTP 400
+    # if qBittorrent is unreachable.  Try enabled first (normal case); fall back
+    # to disabled so the entry exists and the script stays idempotent on re-runs.
+    local response enable
+    for enable in true false; do
+        response=$(curl -s -X POST "${service_url}/api/v3/downloadclient" \
+            -H "X-Api-Key: ${api_key}" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"enable\": ${enable},
+                \"protocol\": \"torrent\",
+                \"priority\": 1,
+                \"removeCompletedDownloads\": true,
+                \"removeFailedDownloads\": true,
+                \"name\": \"qBittorrent\",
+                \"fields\": [
+                    {\"name\": \"host\", \"value\": \"${QBITTORRENT_HOST}\"},
+                    {\"name\": \"port\", \"value\": 8080},
+                    {\"name\": \"useSsl\", \"value\": false},
+                    {\"name\": \"urlBase\", \"value\": \"\"},
+                    {\"name\": \"username\", \"value\": \"${QB_USERNAME}\"},
+                    {\"name\": \"password\", \"value\": \"${QB_PASSWORD}\"},
+                    {\"name\": \"${category_field}\", \"value\": \"${category_value}\"},
+                    {\"name\": \"${imported_category_field}\", \"value\": \"\"},
+                    {\"name\": \"${recent_priority_field}\", \"value\": 0},
+                    {\"name\": \"${older_priority_field}\", \"value\": 0},
+                    {\"name\": \"initialState\", \"value\": 0},
+                    {\"name\": \"sequentialOrder\", \"value\": false},
+                    {\"name\": \"firstAndLast\", \"value\": false}
+                ],
+                \"implementationName\": \"qBittorrent\",
+                \"implementation\": \"QBittorrent\",
+                \"configContract\": \"QBittorrentSettings\",
+                \"tags\": []
+            }")
+        if echo "${response}" | grep -q '"id"'; then
+            break
+        fi
+        [[ "${enable}" == "true" ]] && \
+            log_warn "qBittorrent unreachable — adding as disabled so re-runs stay idempotent"
+    done
+
+    if echo "${response}" | grep -q '"id"'; then
         log_success "qBittorrent added to service"
         return 0
     else
@@ -252,6 +271,15 @@ add_radarr_to_prowlarr() {
     local radarr_key=$2
 
     log_info "Adding Radarr to Prowlarr..."
+
+    # GET-before-POST: skip if Radarr application already configured in Prowlarr
+    local existing
+    existing=$(curl -s "${PROWLARR_URL}/api/v1/applications" \
+        -H "X-Api-Key: ${prowlarr_key}")
+    if echo "${existing}" | grep -q '"name" *: *"Radarr"'; then
+        log_info "Radarr already configured in Prowlarr (already configured, skipping)"
+        return 0
+    fi
 
     local response
     response=$(curl -s -X POST "${PROWLARR_URL}/api/v1/applications" \
@@ -288,6 +316,15 @@ add_sonarr_to_prowlarr() {
 
     log_info "Adding Sonarr to Prowlarr..."
 
+    # GET-before-POST: skip if Sonarr application already configured in Prowlarr
+    local existing
+    existing=$(curl -s "${PROWLARR_URL}/api/v1/applications" \
+        -H "X-Api-Key: ${prowlarr_key}")
+    if echo "${existing}" | grep -q '"name" *: *"Sonarr"'; then
+        log_info "Sonarr already configured in Prowlarr (already configured, skipping)"
+        return 0
+    fi
+
     local response
     response=$(curl -s -X POST "${PROWLARR_URL}/api/v1/applications" \
         -H "X-Api-Key: ${prowlarr_key}" \
@@ -322,6 +359,15 @@ add_radarr_root_folder() {
 
     log_info "Adding root folder to Radarr..."
 
+    # GET-before-POST: skip if /movies root folder already configured
+    local existing
+    existing=$(curl -s "${RADARR_URL}/api/v3/rootfolder" \
+        -H "X-Api-Key: ${api_key}")
+    if echo "${existing}" | grep -q "\"path\" *: *\"${MOVIES_PATH}\""; then
+        log_info "Root folder ${MOVIES_PATH} already configured in Radarr (already configured, skipping)"
+        return 0
+    fi
+
     local response
     response=$(curl -s -X POST "${RADARR_URL}/api/v3/rootfolder" \
         -H "X-Api-Key: ${api_key}" \
@@ -344,6 +390,15 @@ add_sonarr_root_folder() {
     local api_key=$1
 
     log_info "Adding root folder to Sonarr..."
+
+    # GET-before-POST: skip if /tv root folder already configured
+    local existing
+    existing=$(curl -s "${SONARR_URL}/api/v3/rootfolder" \
+        -H "X-Api-Key: ${api_key}")
+    if echo "${existing}" | grep -q "\"path\" *: *\"${TV_PATH}\""; then
+        log_info "Root folder ${TV_PATH} already configured in Sonarr (already configured, skipping)"
+        return 0
+    fi
 
     local response
     response=$(curl -s -X POST "${SONARR_URL}/api/v3/rootfolder" \
@@ -410,9 +465,18 @@ add_public_indexers() {
     log_info "Adding public indexers to Prowlarr..."
     log_info "Note: Some indexers may fail due to geo-blocking or Cloudflare protection"
 
+    # GET-before-POST: fetch existing indexers once to detect duplicates
+    local existing_indexers
+    existing_indexers=$(curl -s "${PROWLARR_URL}/api/v1/indexer" \
+        -H "X-Api-Key: ${api_key}")
+
     local entry name base_url def_name impl_name
     for entry in "${INDEXER_DEFINITIONS[@]}"; do
         IFS='|' read -r name base_url def_name impl_name <<< "${entry}"
+        if echo "${existing_indexers}" | grep -q "\"name\" *: *\"${name}\""; then
+            log_info "${name} already configured in Prowlarr (skipping)"
+            continue
+        fi
         add_indexer "${api_key}" "${name}" "${base_url}" "${def_name}" "${impl_name}"
     done
 }
@@ -729,7 +793,7 @@ main() {
         log_error "Overseerr is not initialized. Please sign in with your Plex account at $OVERSEERR_URL"
         echo "Complete the Overseerr sign-in, then press Enter to continue."
         echo "Or type 'skip' to skip Overseerr configuration for now."
-        read -rp "Continue: " overseerr_choice
+        read -rp "Continue: " overseerr_choice || overseerr_choice=""
         if [[ "$overseerr_choice" =~ ^(skip|s)$ ]]; then
             log_warn "Skipping Overseerr configuration"
         elif ! initialize_overseerr; then
