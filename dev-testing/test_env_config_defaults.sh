@@ -38,7 +38,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 ENV_EXAMPLE="${PROJECT_ROOT}/.env.example"
 CONFIGURE_SH="${PROJECT_ROOT}/configure.sh"
-SETUP_SH="${PROJECT_ROOT}/setup.sh"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

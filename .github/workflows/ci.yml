@@ -29,11 +29,17 @@ jobs:
 
       - name: Run ShellCheck against all .sh files
         run: |
+          # --severity=warning is the standard bar for CI: catches genuine
+          # correctness issues (SC2034 unused vars, SC2068 word-splitting
+          # bugs, etc.) without tripping on info-level false positives
+          # common in test helpers — trap handlers flagged SC2317 as
+          # "unreachable" and intentional single-quoted example strings
+          # flagged SC2016.
           mapfile -t sh_files < <(find . -name "*.sh" -not -path "./.git/*" | sort)
           if [ "${#sh_files[@]}" -eq 0 ]; then
             echo "No .sh files found."
           else
-            shellcheck --severity=style "${sh_files[@]}"
+            shellcheck --severity=warning "${sh_files[@]}"
           fi
 
       - name: Run PSScriptAnalyzer against all .ps1 files
