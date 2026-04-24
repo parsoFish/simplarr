@@ -78,27 +78,42 @@
   </div>
 
   <script>
-    // Service ports - direct access without path-based routing
-    const services = {
-      plex: 32400,
-      overseerr: 5055,
-      radarr: 7878,
-      sonarr: 8989,
-      prowlarr: 9696,
-      qbittorrent: 8080,
-      tautulli: 8181
-    };
+    // Each entry: service id (matches DOM id) → subdomain + port + path.
+    // Prefer subdomain routing (plex.local, radarr.local, ...) so split-topology
+    // services on different hosts route through the local nginx reverse proxy.
+    // Port-based URLs kick in as a fallback only when the page is loaded by
+    // raw IP or a single-label hostname (no TLD to derive).
+    //
+    // Plex is special: the web UI forces HTTPS on port 32400, which requires
+    // a valid cert. Rather than ship an SSL story for the subdomain, default
+    // the Plex tile to app.plex.tv (Plex's cloud web app that auto-discovers
+    // your signed-in server). To route locally instead, replace href with
+    // the subdomain/port form like the other services.
+    const services = [
+      { id: 'plex',        href: 'https://app.plex.tv/desktop'                      },
+      { id: 'overseerr',   subdomain: 'overseerr',   port: 5055,  path: '/'    },
+      { id: 'radarr',      subdomain: 'radarr',      port: 7878,  path: '/'    },
+      { id: 'sonarr',      subdomain: 'sonarr',      port: 8989,  path: '/'    },
+      { id: 'prowlarr',    subdomain: 'prowlarr',    port: 9696,  path: '/'    },
+      { id: 'qbittorrent', subdomain: 'torrent',     port: 8080,  path: '/'    },
+      { id: 'tautulli',    subdomain: 'tautulli',    port: 8181,  path: '/'    }
+    ];
 
-    // Build URLs using the current hostname
-    const host = window.location.hostname;
     const protocol = window.location.protocol;
+    const hostname = window.location.hostname;
+    const isIp = /^[0-9.]+$/.test(hostname) || /:/.test(hostname);
+    const parts = hostname.split('.');
+    const tld = (!isIp && parts.length >= 2) ? parts.slice(1).join('.') : null;
 
-    for (const [id, port] of Object.entries(services)) {
-      const el = document.getElementById(id);
-      if (el) {
-        // Plex has /web path, others get trailing slash
-        const path = id === 'plex' ? '/web' : '/';
-        el.href = `${protocol}//${host}:${port}${path}`;
+    for (const svc of services) {
+      const el = document.getElementById(svc.id);
+      if (!el) continue;
+      if (svc.href) {
+        el.href = svc.href;
+      } else {
+        el.href = tld
+          ? `${protocol}//${svc.subdomain}.${tld}${svc.path}`
+          : `${protocol}//${hostname}:${svc.port}${svc.path}`;
       }
     }
   </script>

@@ -272,6 +272,34 @@ $TZ = Read-UserInput -Prompt "Enter Timezone" -Default $defaultTz
 Write-Success "Timezone set to: $TZ"
 
 # =============================================================================
+# Subdomain TLD
+# =============================================================================
+
+Write-Section "Subdomain TLD (SUBDOMAIN_TLD)"
+
+Write-Host "  Used for service hostnames like plex.<TLD>, radarr.<TLD>, etc."
+Write-Host "  Default is " -NoNewline; Write-Host "local" -ForegroundColor Cyan -NoNewline
+Write-Host " which works on Bonjour/mDNS-capable networks"
+Write-Host "  (macOS/iOS out of the box; Linux with avahi; Windows with Bonjour)."
+Write-Host ""
+Write-Host "  Choose something else (e.g. " -NoNewline
+Write-Host "home" -ForegroundColor Cyan -NoNewline
+Write-Host ", " -NoNewline
+Write-Host "lan" -ForegroundColor Cyan -NoNewline
+Write-Host ", or your own) if your LAN uses a"
+Write-Host "  DNS server (Pi-hole, AdGuard Home, dnsmasq, router DNS) to resolve"
+Write-Host "  service hostnames — .local works poorly there on non-Apple devices."
+Write-Hint "Whatever you pick, make sure your DNS (or hosts file) points *.<TLD> at this host."
+
+$defaultTld = if ($existingEnv['SUBDOMAIN_TLD']) { $existingEnv['SUBDOMAIN_TLD'] } else { "local" }
+
+Write-Host ""
+$SUBDOMAIN_TLD = Read-UserInput -Prompt "Enter subdomain TLD" -Default $defaultTld
+# Strip leading dot if user typed `.local`, keep bare identifier.
+$SUBDOMAIN_TLD = $SUBDOMAIN_TLD.TrimStart('.')
+Write-Success "Subdomain TLD set to: $SUBDOMAIN_TLD"
+
+# =============================================================================
 # Docker Config Path
 # =============================================================================
 
@@ -386,11 +414,11 @@ if (-not [string]::IsNullOrWhiteSpace($PLEX_CLAIM)) {
 
 if ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi") {
     Write-Section "NAS IP Address"
-    
+
     Write-Host "  Enter the IP address of your NAS."
     Write-Host "  This is needed so the reverse proxy can reach Plex and qBittorrent."
     Write-Hint "Example: 192.168.1.100 or 10.0.0.50"
-    
+
     Write-Host ""
     while ($true) {
         $NAS_IP = Read-Host "  Enter NAS IP address"
@@ -402,6 +430,39 @@ if ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi") {
             Write-ErrorMessage "Please enter a valid IP address (e.g., 192.168.1.100)"
         }
     }
+
+    # Dashed form is baked into Plex's plex.direct cert hostname.
+    $NAS_IP_DASHED = $NAS_IP -replace '\.', '-'
+
+    Write-Section "Plex Direct URL Hash (PLEX_DIRECT_HASH)"
+
+    Write-Host "  Plex issues its HTTPS certificate for"
+    Write-Host "    <dashed-ip>.<hash>.plex.direct" -ForegroundColor Cyan
+    Write-Host "  not for the raw IP. Tautulli and Overseerr need this hostname"
+    Write-Host "  resolvable so their TLS connections to Plex validate. We add an"
+    Write-Host "  entry to docker-compose-pi.yml's extra_hosts to pin it."
+    Write-Host ""
+    Write-Host "  How to find your hash:" -ForegroundColor Cyan
+    Write-Host "    1. On the NAS, grep it out of Plex's Preferences.xml (the"
+    Write-Host "       CertificateUUID attribute — 32 hex chars)."
+    Write-Host "    2. Or look it up in Plex Settings → Network →"
+    Write-Host "       Custom server access URLs (the long hex string in"
+    Write-Host "       the .plex.direct hostname)."
+    Write-Host ""
+    Write-Hint "Leave blank to skip — Tautulli/Overseerr Plex features may not work until set."
+
+    $defaultHash = if ($existingEnv['PLEX_DIRECT_HASH']) { $existingEnv['PLEX_DIRECT_HASH'] } else { "" }
+    Write-Host ""
+    $PLEX_DIRECT_HASH = Read-UserInput -Prompt "Enter Plex direct URL hash" -Default $defaultHash
+    if (-not [string]::IsNullOrWhiteSpace($PLEX_DIRECT_HASH)) {
+        if ($PLEX_DIRECT_HASH -match '^[a-f0-9]{32}$') {
+            Write-Success "Plex direct URL hash set"
+        } else {
+            Write-WarningMessage "Hash doesn't look like a 32-char hex string — double-check it"
+        }
+    } else {
+        Write-WarningMessage "No hash set. Tautulli + Overseerr Plex features will fail until you set PLEX_DIRECT_HASH in .env"
+    }
 }
 
 # =============================================================================
@@ -411,28 +472,36 @@ if ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi") {
 Write-Section "Configuration Summary"
 
 Write-Host ""
-Write-Host "  Setup Type:    " -NoNewline
+Write-Host "  Setup Type:       " -NoNewline
 $setupDisplay = if ($SPLIT_DEVICE) { "$SETUP_TYPE ($SPLIT_DEVICE)" } else { $SETUP_TYPE }
 Write-Host $setupDisplay -ForegroundColor White
-Write-Host "  PUID:          " -NoNewline
+Write-Host "  PUID:             " -NoNewline
 Write-Host $PUID -ForegroundColor White
-Write-Host "  PGID:          " -NoNewline
+Write-Host "  PGID:             " -NoNewline
 Write-Host $PGID -ForegroundColor White
-Write-Host "  TZ:            " -NoNewline
+Write-Host "  TZ:               " -NoNewline
 Write-Host $TZ -ForegroundColor White
-Write-Host "  DOCKER_CONFIG: " -NoNewline
+Write-Host "  SUBDOMAIN_TLD:    " -NoNewline
+Write-Host $SUBDOMAIN_TLD -ForegroundColor White
+Write-Host "  DOCKER_CONFIG:    " -NoNewline
 Write-Host $DOCKER_CONFIG -ForegroundColor White
-Write-Host "  DOCKER_MEDIA:  " -NoNewline
+Write-Host "  DOCKER_MEDIA:     " -NoNewline
 Write-Host $DOCKER_MEDIA -ForegroundColor White
-Write-Host "  PLEX_CLAIM:    " -NoNewline
+Write-Host "  PLEX_CLAIM:       " -NoNewline
 if ([string]::IsNullOrWhiteSpace($PLEX_CLAIM)) {
     Write-Host "<not set>" -ForegroundColor DarkGray
 } else {
     Write-Host $PLEX_CLAIM -ForegroundColor White
 }
 if (-not [string]::IsNullOrWhiteSpace($NAS_IP)) {
-    Write-Host "  NAS_IP:        " -NoNewline
+    Write-Host "  NAS_IP:           " -NoNewline
     Write-Host $NAS_IP -ForegroundColor White
+    Write-Host "  NAS_IP_DASHED:    " -NoNewline
+    Write-Host $NAS_IP_DASHED -ForegroundColor White
+}
+if (-not [string]::IsNullOrWhiteSpace($PLEX_DIRECT_HASH)) {
+    Write-Host "  PLEX_DIRECT_HASH: " -NoNewline
+    Write-Host $PLEX_DIRECT_HASH -ForegroundColor White
 }
 Write-Host ""
 
@@ -471,6 +540,9 @@ PGID=$PGID
 # Timezone - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 TZ=$TZ
 
+# Subdomain TLD - the .<tld> suffix used for service hostnames (e.g. plex.local)
+SUBDOMAIN_TLD=$SUBDOMAIN_TLD
+
 # Docker configuration path - where service configs are stored
 DOCKER_CONFIG=$DOCKER_CONFIG
 
@@ -479,6 +551,16 @@ DOCKER_MEDIA=$DOCKER_MEDIA
 
 # Plex claim token - get from https://plex.tv/claim (expires in 4 minutes!)
 PLEX_CLAIM=$PLEX_CLAIM
+
+# Split-topology cross-host routing (only used when split/pi):
+#   NAS_IP            - NAS IP the reverse proxy forwards to
+#   NAS_IP_DASHED     - same IP with dots replaced by dashes (used in
+#                       the Plex direct cert hostname)
+#   PLEX_DIRECT_HASH  - the hex hash in "<dashed-ip>.<hash>.plex.direct"
+#                       (find it in Plex Preferences.xml as CertificateUUID)
+NAS_IP=$NAS_IP
+NAS_IP_DASHED=$NAS_IP_DASHED
+PLEX_DIRECT_HASH=$PLEX_DIRECT_HASH
 "@
 
 $envContent | Out-File -FilePath $EnvFile -Encoding utf8 -Force
@@ -533,20 +615,37 @@ New-Item -ItemType Directory -Path $incompletePath -Force -ErrorAction SilentlyC
 Write-Success "Created incomplete downloads directory"
 
 # =============================================================================
-# Update Nginx Config (Split Setup Only)
+# Update Nginx Config
 # =============================================================================
 
-if ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi" -and -not [string]::IsNullOrWhiteSpace($NAS_IP)) {
-    $splitConf = Join-Path $ScriptDir "nginx\split.conf"
-    if (Test-Path $splitConf) {
-        # Replace YOUR_NAS_IP placeholder with actual IP
-        $content = Get-Content $splitConf -Raw
-        $content = $content -replace 'YOUR_NAS_IP', $NAS_IP
-        $content | Out-File -FilePath $splitConf -Encoding utf8 -Force -NoNewline
-        Write-Success "Updated nginx/split.conf with NAS IP: $NAS_IP"
-    } else {
-        Write-WarningMessage "nginx/split.conf not found - you may need to update it manually"
+# Substitute placeholders in whichever nginx config this deployment uses.
+# Split/pi fills in the NAS IP; both modes fill in the subdomain TLD.
+$nginxConfs = @()
+if ($SETUP_TYPE -eq "unified") {
+    $nginxConfs += Join-Path $ScriptDir "nginx\unified.conf"
+} elseif ($SETUP_TYPE -eq "split" -and $SPLIT_DEVICE -eq "pi") {
+    $nginxConfs += Join-Path $ScriptDir "nginx\split.conf"
+}
+
+foreach ($conf in $nginxConfs) {
+    if (-not (Test-Path $conf)) {
+        Write-WarningMessage "$(Split-Path -Leaf $conf) not found - skipping placeholder substitution"
+        continue
     }
+
+    $content = Get-Content $conf -Raw
+
+    # SUBDOMAIN_TLD -> chosen TLD (always)
+    $content = $content -replace 'SUBDOMAIN_TLD', $SUBDOMAIN_TLD
+    Write-Success "Substituted SUBDOMAIN_TLD -> $SUBDOMAIN_TLD in $(Split-Path -Leaf $conf)"
+
+    # YOUR_NAS_IP -> NAS IP (split/pi only)
+    if (-not [string]::IsNullOrWhiteSpace($NAS_IP)) {
+        $content = $content -replace 'YOUR_NAS_IP', $NAS_IP
+        Write-Success "Substituted YOUR_NAS_IP -> $NAS_IP in $(Split-Path -Leaf $conf)"
+    }
+
+    $content | Out-File -FilePath $conf -Encoding utf8 -Force -NoNewline
 }
 
 # =============================================================================

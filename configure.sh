@@ -530,10 +530,13 @@ get_overseerr_api_key() {
 initialize_overseerr() {
     log_info "Checking Overseerr initialization status..."
 
-    local status_response
-    status_response=$(curl -s "${OVERSEERR_URL}/api/v1/status")
+    # /api/v1/status returns only version info. The `initialized` flag
+    # lives on /api/v1/settings/public (unauthenticated, exposes which
+    # setup steps have been completed).
+    local settings_response
+    settings_response=$(curl -s "${OVERSEERR_URL}/api/v1/settings/public")
 
-    if echo "$status_response" | grep -q '"initialized":true'; then
+    if echo "$settings_response" | grep -q '"initialized":true'; then
         log_info "Overseerr is already initialized"
         return 0
     else

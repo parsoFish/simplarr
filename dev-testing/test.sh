@@ -494,6 +494,154 @@ else
     skip "split.conf content checks — file not found"
 fi
 
+# -- 4c: /health/* routes for homepage status polling -----------------------
+
+printf "\n"
+info "/health/* proxy routes — required by homepage/status.html"
+
+declare -a HEALTH_SERVICES=(plex radarr sonarr prowlarr overseerr qbittorrent tautulli)
+
+for conf_label in unified split; do
+    conf_path="${PROJECT_ROOT}/nginx/${conf_label}.conf"
+    [[ -f "${conf_path}" ]] || { skip "${conf_label}.conf /health/* checks — file not found"; continue; }
+
+    for svc in "${HEALTH_SERVICES[@]}"; do
+        if grep -qE "location[[:space:]]+=[[:space:]]+/health/${svc}([[:space:]]|\{)" "${conf_path}"; then
+            pass "${conf_label}.conf — /health/${svc} location present"
+        else
+            fail "${conf_label}.conf — missing location = /health/${svc} (homepage status tile will 404)"
+        fi
+    done
+done
+
+# -- 4d: SUBDOMAIN_TLD placeholder present (setup.sh substitutes later) -----
+
+printf "\n"
+info "SUBDOMAIN_TLD placeholder — substituted by setup.sh per deployment"
+
+for conf_label in unified split; do
+    conf_path="${PROJECT_ROOT}/nginx/${conf_label}.conf"
+    [[ -f "${conf_path}" ]] || continue
+
+    if grep -q "SUBDOMAIN_TLD" "${conf_path}"; then
+        pass "${conf_label}.conf — SUBDOMAIN_TLD placeholder present"
+    else
+        fail "${conf_label}.conf — missing SUBDOMAIN_TLD placeholder (server_names should not hard-code .local)"
+    fi
+done
+
+# -- 4e: no dedicated home.* server block (shadows /status + /health) -------
+
+printf "\n"
+info "home.* subdomain should not own a server block — default server handles it"
+
+for conf_label in unified split; do
+    conf_path="${PROJECT_ROOT}/nginx/${conf_label}.conf"
+    [[ -f "${conf_path}" ]] || continue
+
+    if grep -qE "server_name[[:space:]]+home\." "${conf_path}"; then
+        fail "${conf_label}.conf — dedicated home.* server block found; remove it so /status + /health/* fall through to the default server"
+    else
+        pass "${conf_label}.conf — no shadowing home.* server block"
+    fi
+done
+
+# -- 4f: homepage inline scripts — use /health/* + subdomain routing --------
+
+printf "\n"
+info "homepage/status.html and index.html inline scripts — migration completeness"
+
+STATUS_HTML="${PROJECT_ROOT}/homepage/status.html"
+INDEX_HTML="${PROJECT_ROOT}/homepage/index.html"
+
+if [[ -f "${STATUS_HTML}" ]]; then
+    if grep -q "'/health/" "${STATUS_HTML}"; then
+        pass "status.html — uses /health/* proxy routes"
+    else
+        fail "status.html — inline script is not using /health/* routes (will check direct host:port URLs, Plex+qBit will show Offline in split mode)"
+    fi
+    if grep -qE "\\\$\{host\}:[0-9]{4,5}" "${STATUS_HTML}"; then
+        fail "status.html — still contains \${host}:PORT direct-port URL construction"
+    else
+        pass "status.html — no legacy \${host}:PORT URL construction"
+    fi
+else
+    skip "status.html checks — file not found"
+fi
+
+if [[ -f "${INDEX_HTML}" ]]; then
+    if grep -q "subdomain:" "${INDEX_HTML}"; then
+        pass "index.html — service definitions include subdomain field for TLD-based routing"
+    else
+        fail "index.html — service definitions missing subdomain: field (falls back to port URLs only)"
+    fi
+    if grep -q "app.plex.tv" "${INDEX_HTML}"; then
+        pass "index.html — Plex tile targets app.plex.tv (avoids local-HTTPS Plex /web redirect)"
+    else
+        fail "index.html — Plex tile should link to app.plex.tv so Plex's forced HTTPS redirect resolves"
+    fi
+else
+    skip "index.html checks — file not found"
+fi
+
+# -- 4g: preflight.sh — no ((VAR++)) pattern that aborts under set -e --------
+
+printf "\n"
+info "preflight.sh counter increments must not rely on post-increment arithmetic"
+
+PREFLIGHT_SH="${PROJECT_ROOT}/preflight.sh"
+if [[ -f "${PREFLIGHT_SH}" ]]; then
+    if grep -E "^\\s*\\(\\([A-Z_]+\\+\\+\\)\\)" "${PREFLIGHT_SH}" > /dev/null; then
+        fail "preflight.sh — contains ((VAR++)) which exits 1 under set -e when VAR=0; replace with VAR=\$((VAR + 1))"
+    else
+        pass "preflight.sh — counter increments are set -e safe"
+    fi
+else
+    skip "preflight.sh counter-increment check — file not found"
+fi
+
+# -- 4h: configure.sh — Overseerr init-check uses correct endpoint ----------
+
+printf "\n"
+info "configure.sh Overseerr initialization detection"
+
+CONFIGURE_SH="${PROJECT_ROOT}/configure.sh"
+if [[ -f "${CONFIGURE_SH}" ]]; then
+    # The initialize_overseerr() function must inspect /api/v1/settings/public
+    # because /api/v1/status only returns version info (no `initialized` flag).
+    if grep -A 10 "^initialize_overseerr()" "${CONFIGURE_SH}" | grep -q "/api/v1/settings/public"; then
+        pass "configure.sh — initialize_overseerr probes /api/v1/settings/public"
+    else
+        fail "configure.sh — initialize_overseerr should query /api/v1/settings/public (where 'initialized' flag lives), not /api/v1/status"
+    fi
+else
+    skip "configure.sh Overseerr check — file not found"
+fi
+
+# -- 4i: docker-compose-pi.yml — extra_hosts for Tautulli + Overseerr -------
+
+printf "\n"
+info "docker-compose-pi.yml cross-host Plex cert hostname aliases"
+
+COMPOSE_PI="${PROJECT_ROOT}/docker-compose-pi.yml"
+if [[ -f "${COMPOSE_PI}" ]]; then
+    # Both Tautulli and Overseerr need the plex.direct hostname aliased to
+    # NAS_IP so TLS validation succeeds.
+    if grep -qE "plex\\.direct" "${COMPOSE_PI}"; then
+        # Count occurrences — expect one under tautulli, one under overseerr
+        count=$(grep -c "plex.direct" "${COMPOSE_PI}" || true)
+        if [[ "${count}" -ge 2 ]]; then
+            pass "docker-compose-pi.yml — plex.direct extra_hosts present in ${count} service(s)"
+        else
+            fail "docker-compose-pi.yml — plex.direct extra_hosts only present ${count} time(s); expected \$ge 2 (tautulli + overseerr)"
+        fi
+    else
+        fail "docker-compose-pi.yml — missing plex.direct extra_hosts entries for Tautulli and Overseerr"
+    fi
+else
+    skip "docker-compose-pi.yml extra_hosts check — file not found"
+fi
+
 # ---------------------------------------------------------------------------
 # Phase 5: qBittorrent Template Validation
 # ---------------------------------------------------------------------------
@@ -1184,13 +1332,16 @@ else
 
     printf "
 "
-    info "Overseerr integration — status endpoint via live container (full-suite only)"
+    info "Overseerr integration — /api/v1/settings/public via live container (full-suite only)"
 
-    _ovsr_status=$(curl -s --max-time 10         "http://localhost:${PORT_OVERSEERR}/api/v1/status" 2>/dev/null || true)
-    if [[ -n "${_ovsr_status}" ]] && echo "${_ovsr_status}" | grep -q '"initialized"'; then
-        pass "Overseerr integration — status endpoint returns 'initialized' field"
+    # /api/v1/status returns only version info — the `initialized` flag
+    # lives on /api/v1/settings/public (unauthenticated). configure.sh
+    # queries this same endpoint.
+    _ovsr_settings=$(curl -s --max-time 10         "http://localhost:${PORT_OVERSEERR}/api/v1/settings/public" 2>/dev/null || true)
+    if [[ -n "${_ovsr_settings}" ]] && echo "${_ovsr_settings}" | grep -q '"initialized"'; then
+        pass "Overseerr integration — /api/v1/settings/public returns 'initialized' field"
     else
-        fail "Overseerr integration — status endpoint did not return 'initialized' field"
+        fail "Overseerr integration — /api/v1/settings/public did not return 'initialized' field (expected the same endpoint configure.sh probes)"
     fi
 
     # Fresh Overseerr container will not have settings.json until Plex OAuth completes.
@@ -2023,11 +2174,13 @@ printf "\n"
 info "Port literal guard — configure.sh"
 
 if [[ -f "${PROJECT_ROOT}/configure.sh" ]]; then
-    # Grep for port literals; exclude bash variable default-value lines.
+    # Grep for port literals; exclude bash variable default-value lines
+    # and pure comment lines (docstring examples like `http://localhost:7878`).
     # Lines using the ${VAR:-value} substitution syntax are intentional
     # single-source-of-truth declarations and are exempt from this guard.
     _STRAY_SH=$(grep -En "${_PORT_PATTERN}" "${PROJECT_ROOT}/configure.sh" \
-        | grep -vE '\$\{[A-Z_]+:-' || true)
+        | grep -vE '\$\{[A-Z_]+:-' \
+        | grep -vE '^[0-9]+:\s*#' || true)
 
     if [[ -z "${_STRAY_SH}" ]]; then
         pass "configure.sh — no stray port literals outside variable default-value lines"

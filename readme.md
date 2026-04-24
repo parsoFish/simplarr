@@ -170,6 +170,8 @@ If your NAS struggles with the *arr apps, you can run Plex and qBittorrent on th
 
 > ✅ **Split setup note:** For the Pi/Server, the configure script should point qBittorrent at the NAS. Set `QBITTORRENT_HOST` to your NAS IP (or hostname) and use `QBITTORRENT_URL` if the WebUI is not on the Pi.
 
+> ⚠️ **Plex cert hostname (`PLEX_DIRECT_HASH`):** In split mode, Tautulli and Overseerr both need to reach Plex over HTTPS, but Plex's certificate is issued for `<dashed-ip>.<hash>.plex.direct` — not for the raw IP. `docker-compose-pi.yml` adds an `extra_hosts` entry so those containers resolve that hostname to the NAS IP. The setup script prompts for the 32-char hex `PLEX_DIRECT_HASH`; find it in your Plex server's `Preferences.xml` as the `CertificateUUID` attribute, or look at Plex **Settings → Network → Custom server access URLs** (the long hex string in the `.plex.direct` hostname). If you skip this, Tautulli's Plex dashboard and Overseerr's library-scan job will fail with TLS validation errors.
+
 ### Split Setup From a Primary Machine (No Full Clone on Both Devices)
 
 If you don’t want to keep the full repo on both the NAS and the Pi/Server, you can copy only the required files from a primary machine:
@@ -225,13 +227,35 @@ Once running, access services via direct ports or through the homepage:
 
 ### Friendly Domain Names (Optional)
 
-If you have a DNS server like Pi-hole, you can set up local domains:
+Simplarr serves per-service hostnames like `plex.<TLD>`, `radarr.<TLD>`, `overseerr.<TLD>`, etc. The `<TLD>` is whatever you entered for `SUBDOMAIN_TLD` during setup (default: `local`).
 
-```
-plex.local      → your-server-ip
-radarr.local    → your-server-ip
-overseerr.local → your-server-ip
-```
+Your network needs to resolve those names to the host running simplarr's nginx. Two common options:
+
+**Option A — mDNS / Bonjour (`SUBDOMAIN_TLD=local`, default)**
+
+`.local` is reserved for mDNS. This works automatically on:
+- **macOS, iOS** — Bonjour ships with the OS
+- **Linux with Avahi** — typically pre-installed on Raspberry Pi OS, Ubuntu desktop, Fedora
+- **Windows with Bonjour** (ships with iTunes; otherwise install Bonjour Print Services)
+
+On a pure-mDNS network, all devices will resolve `home.local` / `plex.local` / etc. without any DNS configuration. But be aware:
+- **Android** has no built-in mDNS — `.local` names won't resolve on mobile unless you add a DNS entry or use `/etc/hosts`.
+- **Windows without Bonjour** won't resolve either.
+
+**Option B — Local DNS (`SUBDOMAIN_TLD=home`, `lan`, etc.)**
+
+If you run Pi-hole, AdGuard Home, dnsmasq, Unbound, or your router provides local DNS:
+1. Pick a TLD that won't collide with real internet TLDs (`home`, `lan`, `media`, `box` — all safe; do **not** use `.com`, `.net`, etc.)
+2. Re-run `./setup.sh` and enter your chosen TLD at the `SUBDOMAIN_TLD` prompt
+3. Add wildcard A-records in your DNS: `*.<TLD>` → your-server-ip
+   - **Pi-hole:** Local DNS → CNAME Records → add one per subdomain
+   - **AdGuard Home:** Filters → DNS rewrites → `*.home → 192.168.1.100`
+   - **dnsmasq:** `address=/<TLD>/your-server-ip` in `/etc/dnsmasq.d/*.conf`
+
+This route works on every device — including Android and Windows without Bonjour — and is the recommended path if you have ≥1 user on those platforms.
+
+> **Why not just use `.local` with local DNS?**
+> macOS and iOS hard-code `.local` → mDNS and *never* query regular DNS for it. Adding `.local` entries in dnsmasq fixes Windows/Android/Linux but Apple devices still fail. A custom TLD avoids the whole conflict.
 
 See the [Pi-hole Local DNS guide](https://docs.pi-hole.net/guides/dns/dns-records/) for setup instructions.
 
