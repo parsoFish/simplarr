@@ -18,18 +18,17 @@
     Justification = 'This interactive configuration script intentionally uses Write-Host for colored console output. Write-Output cannot produce the colored terminal UI required for the user experience.'
 )]
 param(
-    [int]$RadarrPort = $(if ($env:RADARR_PORT) { [int]$env:RADARR_PORT } else { 7878 }),
-    [int]$SonarrPort = $(if ($env:SONARR_PORT) { [int]$env:SONARR_PORT } else { 8989 }),
-    [string]$RadarrUrl = "http://localhost:$RadarrPort",
-    [string]$SonarrUrl = "http://localhost:$SonarrPort",
-    [string]$ProwlarrUrl = "http://localhost:9696",
-    [string]$QBittorrentUrl = "http://localhost:8080",
-    [string]$OverseerrUrl = "http://localhost:5055",
-    [int]$RadarrPort = 7878,
-    [int]$SonarrPort = 8989,
-    [int]$ProwlarrPort = 9696,
-    [int]$QBittorrentPort = 8080,
-    [string]$ConfigDir = ".\configs",
+    [int]$RadarrPort      = $(if ($env:RADARR_PORT)      { [int]$env:RADARR_PORT }      else { 7878 }),
+    [int]$SonarrPort      = $(if ($env:SONARR_PORT)      { [int]$env:SONARR_PORT }      else { 8989 }),
+    [int]$ProwlarrPort    = $(if ($env:PROWLARR_PORT)    { [int]$env:PROWLARR_PORT }    else { 9696 }),
+    [int]$QBittorrentPort = $(if ($env:QBITTORRENT_PORT) { [int]$env:QBITTORRENT_PORT } else { 8080 }),
+    [int]$OverseerrPort   = $(if ($env:OVERSEERR_PORT)   { [int]$env:OVERSEERR_PORT }   else { 5055 }),
+    [string]$RadarrUrl      = "http://localhost:$RadarrPort",
+    [string]$SonarrUrl      = "http://localhost:$SonarrPort",
+    [string]$ProwlarrUrl    = "http://localhost:$ProwlarrPort",
+    [string]$QBittorrentUrl = "http://localhost:$QBittorrentPort",
+    [string]$OverseerrUrl   = "http://localhost:$OverseerrPort",
+    [string]$ConfigDir      = ".\configs",
     [string]$QBittorrentHost = $env:QBITTORRENT_HOST
 )
 
