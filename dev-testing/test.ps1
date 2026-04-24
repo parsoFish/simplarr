@@ -396,6 +396,139 @@ if ($missingUpstreams.Count -eq 0) {
     Write-Fail "Missing or incorrect upstreams: $($missingUpstreams -join ', ')"
 }
 
+# /health/* routes backing homepage status polling
+Write-Test "Checking /health/<service> proxy routes in unified.conf + split.conf..."
+$healthServices = @("plex", "radarr", "sonarr", "prowlarr", "overseerr", "qbittorrent", "tautulli")
+$missingHealth = @()
+foreach ($confLabel in @("unified", "split")) {
+    $confPath = "nginx/$confLabel.conf"
+    if (-not (Test-Path $confPath)) { continue }
+    $confRaw = Get-Content -Raw $confPath
+    foreach ($svc in $healthServices) {
+        if ($confRaw -notmatch "location\s*=\s*/health/$svc") {
+            $missingHealth += "$confLabel.conf /health/$svc"
+        }
+    }
+}
+if ($missingHealth.Count -eq 0) {
+    Write-Pass "All /health/<service> locations present in both nginx configs"
+} else {
+    Write-Fail "Missing /health/* routes (homepage status tiles will 404): $($missingHealth -join ', ')"
+}
+
+# SUBDOMAIN_TLD placeholder
+Write-Test "Checking SUBDOMAIN_TLD placeholder (substituted by setup.sh)..."
+$missingTld = @()
+foreach ($confLabel in @("unified", "split")) {
+    $confPath = "nginx/$confLabel.conf"
+    if (-not (Test-Path $confPath)) { continue }
+    if ((Get-Content -Raw $confPath) -notmatch "SUBDOMAIN_TLD") {
+        $missingTld += "$confLabel.conf"
+    }
+}
+if ($missingTld.Count -eq 0) {
+    Write-Pass "SUBDOMAIN_TLD placeholder present in both nginx configs"
+} else {
+    Write-Fail "SUBDOMAIN_TLD placeholder missing: $($missingTld -join ', ')"
+}
+
+# No dedicated home.* server block (falls through to default server)
+Write-Test "Checking no dedicated home.* server block (would shadow /status + /health/*)..."
+$shadowedHome = @()
+foreach ($confLabel in @("unified", "split")) {
+    $confPath = "nginx/$confLabel.conf"
+    if (-not (Test-Path $confPath)) { continue }
+    if ((Get-Content -Raw $confPath) -match "server_name\s+home\.") {
+        $shadowedHome += "$confLabel.conf"
+    }
+}
+if ($shadowedHome.Count -eq 0) {
+    Write-Pass "No shadowing home.* server block in nginx configs"
+} else {
+    Write-Fail "Dedicated home.* server block present (shadows default-server routes): $($shadowedHome -join ', ')"
+}
+
+# Homepage inline scripts — /health/* in status.html; subdomain routing + app.plex.tv in index.html
+Write-Test "Checking homepage/status.html uses /health/* proxy routes..."
+$statusHtml = "homepage/status.html"
+if (Test-Path $statusHtml) {
+    $statusRaw = Get-Content -Raw $statusHtml
+    if ($statusRaw -match "'/health/") {
+        Write-Pass "status.html uses /health/* routes"
+    } else {
+        Write-Fail "status.html does not use /health/* routes (Plex/qBit will show Offline in split mode)"
+    }
+    if ($statusRaw -match '\$\{host\}:\d{4,5}') {
+        Write-Fail "status.html still contains `$`{host}:PORT direct-port URL construction"
+    } else {
+        Write-Pass "status.html has no legacy `$`{host}:PORT URL construction"
+    }
+} else {
+    Write-Skip "status.html checks — file not found"
+}
+
+Write-Test "Checking homepage/index.html uses subdomain routing + app.plex.tv..."
+$indexHtml = "homepage/index.html"
+if (Test-Path $indexHtml) {
+    $indexRaw = Get-Content -Raw $indexHtml
+    if ($indexRaw -match "subdomain:") {
+        Write-Pass "index.html service definitions include subdomain field"
+    } else {
+        Write-Fail "index.html service definitions missing subdomain: field"
+    }
+    if ($indexRaw -match "app\.plex\.tv") {
+        Write-Pass "index.html Plex tile targets app.plex.tv"
+    } else {
+        Write-Fail "index.html Plex tile should target app.plex.tv (avoids local Plex HTTPS redirect)"
+    }
+} else {
+    Write-Skip "index.html checks — file not found"
+}
+
+# preflight.sh counter increments must be set -e safe
+Write-Test "Checking preflight.sh counter increments are set -e safe..."
+$preflightSh = "preflight.sh"
+if (Test-Path $preflightSh) {
+    if ((Get-Content -Raw $preflightSh) -match '^\s*\(\([A-Z_]+\+\+\)\)' -or `
+        (Get-Content -Raw $preflightSh) -match '\n\s*\(\([A-Z_]+\+\+\)\)') {
+        Write-Fail "preflight.sh contains ((VAR++)) which exits 1 under set -e when VAR=0"
+    } else {
+        Write-Pass "preflight.sh counter increments are set -e safe"
+    }
+} else {
+    Write-Skip "preflight.sh counter-increment check — file not found"
+}
+
+# configure.sh — Overseerr init check uses correct endpoint
+Write-Test "Checking configure.sh Overseerr initialization check uses /api/v1/settings/public..."
+$configureSh = "configure.sh"
+if (Test-Path $configureSh) {
+    $configureRaw = Get-Content -Raw $configureSh
+    # Look within the initialize_overseerr function body
+    if ($configureRaw -match 'initialize_overseerr\(\)[\s\S]{0,400}?/api/v1/settings/public') {
+        Write-Pass "configure.sh initialize_overseerr probes /api/v1/settings/public"
+    } else {
+        Write-Fail "configure.sh initialize_overseerr should query /api/v1/settings/public (where 'initialized' flag lives), not /api/v1/status"
+    }
+} else {
+    Write-Skip "configure.sh Overseerr init-check — file not found"
+}
+
+# docker-compose-pi.yml — extra_hosts for plex.direct on Tautulli + Overseerr
+Write-Test "Checking docker-compose-pi.yml has plex.direct extra_hosts for Tautulli + Overseerr..."
+$composePi = "docker-compose-pi.yml"
+if (Test-Path $composePi) {
+    $composeRaw = Get-Content -Raw $composePi
+    $plexDirectCount = ([regex]::Matches($composeRaw, "plex\.direct")).Count
+    if ($plexDirectCount -ge 2) {
+        Write-Pass "docker-compose-pi.yml — plex.direct extra_hosts present in $plexDirectCount service(s)"
+    } else {
+        Write-Fail "docker-compose-pi.yml — plex.direct only present $plexDirectCount time(s); expected >= 2 (tautulli + overseerr)"
+    }
+} else {
+    Write-Skip "docker-compose-pi.yml extra_hosts check — file not found"
+}
+
 # =============================================================================
 # Template Configuration Tests
 # =============================================================================

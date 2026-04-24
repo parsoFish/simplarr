@@ -12,5 +12,20 @@
     "no-undef": "error",
     "eqeqeq": "error",
     "no-console": "warn"
-  }
+  },
+  "overrides": [
+    {
+      "files": ["js/services.js"],
+      "env": {
+        "node": true
+      }
+    },
+    {
+      "files": ["js/__tests__/**/*.js"],
+      "env": {
+        "node": true,
+        "jest": true
+      }
+    }
+  ]
 }

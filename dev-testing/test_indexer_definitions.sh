@@ -36,7 +36,6 @@ CONFIGURE_PS1="${PROJECT_ROOT}/configure.ps1"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 BOLD='\033[1m'
@@ -106,7 +105,6 @@ fi
 
 section "Phase 2: \$IndexerDefinitions Defined Outside Functions"
 
-FUNC_BODY_LINES="$(grep -n 'IndexerDefinitions' "${CONFIGURE_PS1}" || true)"
 INDEXER_DEF_LINE="$(grep -n '^\$IndexerDefinitions' "${CONFIGURE_PS1}" | head -1 | cut -d: -f1 || true)"
 
 if [[ -z "${INDEXER_DEF_LINE}" ]]; then

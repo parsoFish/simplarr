@@ -227,6 +227,30 @@ TZ="${input_tz:-$default_tz}"
 print_success "Timezone set to: $TZ"
 
 # =============================================================================
+# Subdomain TLD
+# =============================================================================
+
+print_section "Subdomain TLD (SUBDOMAIN_TLD)"
+
+echo -e "  Used for service hostnames like plex.<TLD>, radarr.<TLD>, etc."
+echo -e "  Default is ${CYAN}local${NC} which works on Bonjour/mDNS-capable networks"
+echo -e "  (macOS/iOS out of the box; Linux with avahi; Windows with Bonjour)."
+echo ""
+echo -e "  Choose something else (e.g. ${CYAN}home${NC}, ${CYAN}lan${NC}, or your own) if your LAN uses a"
+echo -e "  DNS server (Pi-hole, AdGuard Home, dnsmasq, router DNS) to resolve"
+echo -e "  service hostnames — .local works poorly there on non-Apple devices."
+print_hint "Whatever you pick, make sure your DNS (or /etc/hosts) points *.<TLD> at this host."
+
+default_tld="${SUBDOMAIN_TLD:-local}"
+
+echo ""
+read -rp "  Enter subdomain TLD [$default_tld]: " input_tld
+SUBDOMAIN_TLD="${input_tld:-$default_tld}"
+# Strip leading dot if user typed `.local`, keep bare identifier.
+SUBDOMAIN_TLD="${SUBDOMAIN_TLD#.}"
+print_success "Subdomain TLD set to: $SUBDOMAIN_TLD"
+
+# =============================================================================
 # Docker Config Path
 # =============================================================================
 
@@ -346,6 +370,42 @@ if [[ "$SETUP_TYPE" == "split" && "$SPLIT_DEVICE" == "pi" ]]; then
             print_error "Please enter a valid IP address (e.g., 192.168.1.100)"
         fi
     done
+
+    # Dashed form is baked into Plex's plex.direct cert hostname.
+    NAS_IP_DASHED="${NAS_IP//./-}"
+
+    print_section "Plex Direct URL Hash (PLEX_DIRECT_HASH)"
+
+    echo -e "  Plex issues its HTTPS certificate for"
+    echo -e "    ${CYAN}<dashed-ip>.<hash>.plex.direct${NC}"
+    echo -e "  not for the raw IP. Tautulli and Overseerr need this hostname"
+    echo -e "  resolvable so their TLS connections to Plex validate. We add an"
+    echo -e "  entry to docker-compose-pi.yml's extra_hosts to pin it."
+    echo ""
+    echo -e "  ${CYAN}How to find your hash:${NC}"
+    echo -e "    1. On the NAS, grep it out of Plex's Preferences.xml:"
+    echo -e "       ${BOLD}grep -oP 'CertificateUUID=\"\\K[a-f0-9]+' \\${NC}"
+    echo -e "         \"\$DOCKER_CONFIG/plex/Library/Application Support/\\${NC}"
+    echo -e "         Plex Media Server/Preferences.xml\""
+    echo -e "    2. Or look it up in Plex Settings → Network →"
+    echo -e "       Custom server access URLs (the long hex string"
+    echo -e "       in the .plex.direct hostname)."
+    echo ""
+    print_hint "Leave blank to skip — Tautulli/Overseerr Plex features may not work until set."
+
+    default_hash="${PLEX_DIRECT_HASH:-}"
+    echo ""
+    read -rp "  Enter Plex direct URL hash${default_hash:+ [$default_hash]}: " input_hash
+    PLEX_DIRECT_HASH="${input_hash:-$default_hash}"
+    if [[ -n "$PLEX_DIRECT_HASH" ]]; then
+        if [[ "$PLEX_DIRECT_HASH" =~ ^[a-f0-9]{32}$ ]]; then
+            print_success "Plex direct URL hash set"
+        else
+            print_warning "Hash doesn't look like a 32-char hex string — double-check it"
+        fi
+    else
+        print_warning "No hash set. Tautulli + Overseerr Plex features will fail until you set PLEX_DIRECT_HASH in .env"
+    fi
 fi
 
 # =============================================================================
@@ -355,15 +415,20 @@ fi
 print_section "Configuration Summary"
 
 echo ""
-echo -e "  ${BOLD}Setup Type:${NC}    $SETUP_TYPE${SPLIT_DEVICE:+ ($SPLIT_DEVICE)}"
-echo -e "  ${BOLD}PUID:${NC}          $PUID"
-echo -e "  ${BOLD}PGID:${NC}          $PGID"
-echo -e "  ${BOLD}TZ:${NC}            $TZ"
-echo -e "  ${BOLD}DOCKER_CONFIG:${NC} $DOCKER_CONFIG"
-echo -e "  ${BOLD}DOCKER_MEDIA:${NC}  $DOCKER_MEDIA"
-echo -e "  ${BOLD}PLEX_CLAIM:${NC}    ${PLEX_CLAIM:-<not set>}"
+echo -e "  ${BOLD}Setup Type:${NC}       $SETUP_TYPE${SPLIT_DEVICE:+ ($SPLIT_DEVICE)}"
+echo -e "  ${BOLD}PUID:${NC}             $PUID"
+echo -e "  ${BOLD}PGID:${NC}             $PGID"
+echo -e "  ${BOLD}TZ:${NC}               $TZ"
+echo -e "  ${BOLD}SUBDOMAIN_TLD:${NC}    $SUBDOMAIN_TLD"
+echo -e "  ${BOLD}DOCKER_CONFIG:${NC}    $DOCKER_CONFIG"
+echo -e "  ${BOLD}DOCKER_MEDIA:${NC}     $DOCKER_MEDIA"
+echo -e "  ${BOLD}PLEX_CLAIM:${NC}       ${PLEX_CLAIM:-<not set>}"
 if [[ -n "$NAS_IP" ]]; then
-    echo -e "  ${BOLD}NAS_IP:${NC}        $NAS_IP"
+    echo -e "  ${BOLD}NAS_IP:${NC}           $NAS_IP"
+    echo -e "  ${BOLD}NAS_IP_DASHED:${NC}    $NAS_IP_DASHED"
+fi
+if [[ -n "$PLEX_DIRECT_HASH" ]]; then
+    echo -e "  ${BOLD}PLEX_DIRECT_HASH:${NC} $PLEX_DIRECT_HASH"
 fi
 echo ""
 
@@ -400,6 +465,9 @@ PGID=$PGID
 # Timezone - https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
 TZ=$TZ
 
+# Subdomain TLD - the .<tld> suffix used for service hostnames (e.g. plex.local)
+SUBDOMAIN_TLD=$SUBDOMAIN_TLD
+
 # Docker configuration path - where service configs are stored
 DOCKER_CONFIG=$DOCKER_CONFIG
 
@@ -408,6 +476,16 @@ DOCKER_MEDIA=$DOCKER_MEDIA
 
 # Plex claim token - get from https://plex.tv/claim (expires in 4 minutes!)
 PLEX_CLAIM=$PLEX_CLAIM
+
+# Split-topology cross-host routing (only used when split/pi):
+#   NAS_IP            - NAS IP the reverse proxy forwards to
+#   NAS_IP_DASHED     - same IP with dots replaced by dashes (used in
+#                       the Plex direct cert hostname)
+#   PLEX_DIRECT_HASH  - the hex hash in \"<dashed-ip>.<hash>.plex.direct\"
+#                       (find it in Plex Preferences.xml as CertificateUUID)
+NAS_IP=${NAS_IP:-}
+NAS_IP_DASHED=${NAS_IP_DASHED:-}
+PLEX_DIRECT_HASH=${PLEX_DIRECT_HASH:-}
 EOF
 
 echo ""
@@ -458,19 +536,34 @@ mkdir -p "$DOCKER_MEDIA/downloads/incomplete" 2>/dev/null
 print_success "Created incomplete downloads directory"
 
 # =============================================================================
-# Update Nginx Config (Split Setup Only)
+# Update Nginx Config
 # =============================================================================
 
-if [[ "$SETUP_TYPE" == "split" && "$SPLIT_DEVICE" == "pi" && -n "$NAS_IP" ]]; then
-    SPLIT_CONF="$SCRIPT_DIR/nginx/split.conf"
-    if [[ -f "$SPLIT_CONF" ]]; then
-        # Replace YOUR_NAS_IP placeholder with actual IP
-        sed -i "s/YOUR_NAS_IP/$NAS_IP/g" "$SPLIT_CONF"
-        print_success "Updated nginx/split.conf with NAS IP: $NAS_IP"
-    else
-        print_warning "nginx/split.conf not found - you may need to update it manually"
-    fi
+# Substitute placeholders in whichever nginx config this deployment uses.
+# Split/pi fills in the NAS IP; both modes fill in the subdomain TLD.
+NGINX_CONFS=()
+if [[ "$SETUP_TYPE" == "unified" ]]; then
+    NGINX_CONFS+=("$SCRIPT_DIR/nginx/unified.conf")
+elif [[ "$SETUP_TYPE" == "split" && "$SPLIT_DEVICE" == "pi" ]]; then
+    NGINX_CONFS+=("$SCRIPT_DIR/nginx/split.conf")
 fi
+
+for conf in "${NGINX_CONFS[@]}"; do
+    if [[ ! -f "$conf" ]]; then
+        print_warning "$(basename "$conf") not found — skipping placeholder substitution"
+        continue
+    fi
+
+    # SUBDOMAIN_TLD → chosen TLD (always).
+    sed -i "s/SUBDOMAIN_TLD/$SUBDOMAIN_TLD/g" "$conf"
+    print_success "Substituted SUBDOMAIN_TLD → $SUBDOMAIN_TLD in $(basename "$conf")"
+
+    # YOUR_NAS_IP → NAS IP (split/pi only).
+    if [[ -n "$NAS_IP" ]]; then
+        sed -i "s/YOUR_NAS_IP/$NAS_IP/g" "$conf"
+        print_success "Substituted YOUR_NAS_IP → $NAS_IP in $(basename "$conf")"
+    fi
+done
 
 # =============================================================================
 # Next Steps

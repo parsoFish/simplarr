@@ -29,21 +29,30 @@ jobs:
 
       - name: Run ShellCheck against all .sh files
         run: |
+          # --severity=warning is the standard bar for CI: catches genuine
+          # correctness issues (SC2034 unused vars, SC2068 word-splitting
+          # bugs, etc.) without tripping on info-level false positives
+          # common in test helpers — trap handlers flagged SC2317 as
+          # "unreachable" and intentional single-quoted example strings
+          # flagged SC2016.
           mapfile -t sh_files < <(find . -name "*.sh" -not -path "./.git/*" | sort)
           if [ "${#sh_files[@]}" -eq 0 ]; then
             echo "No .sh files found."
           else
-            shellcheck --severity=style "${sh_files[@]}"
+            shellcheck --severity=warning "${sh_files[@]}"
           fi
 
       - name: Run PSScriptAnalyzer against all .ps1 files
         shell: pwsh
         run: |
+          # Settings file pins severity + rule exclusions so CI and local
+          # pwsh invocations agree. See .github/linters/PSScriptAnalyzerSettings.psd1.
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $settings = Join-Path $PWD '.github/linters/PSScriptAnalyzerSettings.psd1'
           $ps1Files = Get-ChildItem -Recurse -Filter "*.ps1" |
             Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' }
           $findings = $ps1Files | ForEach-Object {
-            Invoke-ScriptAnalyzer -Path $_.FullName -Severity @('Warning', 'Error')
+            Invoke-ScriptAnalyzer -Path $_.FullName -Settings $settings
           }
           if ($findings) {
             $findings | Format-List
@@ -153,21 +162,31 @@ jobs:
             exit 1
           fi
 
-      - name: PowerShell PSParser syntax validation
+      - name: PowerShell AST syntax validation
         shell: pwsh
         run: |
+          # Use Language.Parser::ParseFile (the PowerShell 3+ AST parser)
+          # rather than the legacy PSParser::Tokenize. The legacy tokenizer
+          # dates from PS2 and emits false positives on PowerShell 5.1+
+          # syntax that runs fine at runtime — see issues like param
+          # attribute suppression, $using: variables in ScriptBlock,
+          # ternary expressions, and similar.
           $failed = $false
           $scripts = Get-ChildItem -Recurse -Filter "*.ps1" |
             Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' }
 
           foreach ($script in $scripts) {
-            $content = Get-Content -Raw $script.FullName
             $parseErrors = $null
-            $null = [System.Management.Automation.PSParser]::Tokenize($content, [ref]$parseErrors)
+            $tokens = $null
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $script.FullName, [ref]$tokens, [ref]$parseErrors)
 
             if ($parseErrors.Count -gt 0) {
-              Write-Error "Syntax errors in $($script.FullName):"
-              $parseErrors | ForEach-Object { Write-Error "  Line $($_.Token.StartLine): $($_.Message)" }
+              Write-Host ""
+              Write-Host "Syntax errors in $($script.FullName):"
+              foreach ($err in $parseErrors) {
+                Write-Host "  Line $($err.Extent.StartLineNumber), Col $($err.Extent.StartColumnNumber): $($err.Message)"
+              }
               $failed = $true
             } else {
               Write-Host "  [OK] $($script.FullName)"

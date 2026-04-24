@@ -58,19 +58,23 @@ print_section() {
 
 pass() {
     echo -e "  ${CHECK} $1"
-    ((PASS_COUNT++))
+    # Use arithmetic assignment instead of post-increment: `((VAR++))`
+    # returns the *pre*-increment value as its exit status, so when
+    # PASS_COUNT transitions from 0 -> 1 the expression evaluates to
+    # status 1, which aborts the whole script under `set -e`.
+    PASS_COUNT=$((PASS_COUNT + 1))
 }
 
 fail() {
     echo -e "  ${CROSS} $1"
     echo -e "      ${YELLOW}→ Suggestion: $2${NC}"
-    ((FAIL_COUNT++))
+    FAIL_COUNT=$((FAIL_COUNT + 1))
 }
 
 warn() {
     echo -e "  ${WARN} $1"
     echo -e "      ${YELLOW}→ Note: $2${NC}"
-    ((WARN_COUNT++))
+    WARN_COUNT=$((WARN_COUNT + 1))
 }
 
 info() {

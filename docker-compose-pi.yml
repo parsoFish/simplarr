@@ -10,7 +10,20 @@
 #
 #   2. Mount should contain: downloads/, movies/, tv/
 #
-#   3. Update nginx/split.conf with your NAS IP (or run setup.sh on Pi)
+#   3. Run ./setup.sh on the Pi to generate .env and substitute NAS IP
+#      and subdomain TLD into nginx/split.conf.
+#
+# PLEX_DIRECT_HASH notes:
+#   Tautulli and Overseerr both need to reach Plex over HTTPS, but Plex's
+#   certificate is issued for `<dashed-ip>.<hash>.plex.direct`, not for
+#   the raw IP. We provide an `extra_hosts` entry so these containers
+#   resolve that hostname to the NAS IP — otherwise the TLS handshake fails
+#   with "Hostname/IP does not match certificate's altnames".
+#
+#   Find your hash with:
+#     grep -oP 'CertificateUUID="\K[a-f0-9]+' \
+#       "$DOCKER_CONFIG"/plex/Library/Application\ Support/Plex\ Media\ Server/Preferences.xml
+#   Or it's shown in Plex Settings → Network → Custom server access URLs.
 #
 # If your NFS mount is at a different path, update the volume mappings below.
 # =============================================================================
@@ -86,6 +99,10 @@ services:
       - PUID=${PUID}
       - PGID=${PGID}
       - TZ=${TZ}
+    # Resolve Plex's plex.direct cert hostname to the NAS IP so Tautulli's
+    # TLS connection to Plex validates. See PLEX_DIRECT_HASH note above.
+    extra_hosts:
+      - "${NAS_IP_DASHED:-0-0-0-0}.${PLEX_DIRECT_HASH:-unset}.plex.direct:${NAS_IP:-0.0.0.0}"
     volumes:
       - ${DOCKER_CONFIG}/tautulli:/config
       - /mnt/nas/movies:/movies
@@ -126,6 +143,10 @@ services:
     environment:
       - TZ=${TZ}
       - LOG_LEVEL=info
+    # Same reasoning as tautulli: lets Overseerr's Plex library scan
+    # reach Plex over HTTPS with a matching cert hostname.
+    extra_hosts:
+      - "${NAS_IP_DASHED:-0-0-0-0}.${PLEX_DIRECT_HASH:-unset}.plex.direct:${NAS_IP:-0.0.0.0}"
     volumes:
       - ${DOCKER_CONFIG}/overseerr:/app/config
     healthcheck:

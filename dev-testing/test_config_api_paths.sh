@@ -65,7 +65,6 @@ PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CONFIG_TEMPLATE="${PROJECT_ROOT}/homepage/config.json.template"
 ENTRYPOINT_SH="${PROJECT_ROOT}/homepage/entrypoint.sh"
 UNIFIED_CONF="${PROJECT_ROOT}/nginx/unified.conf"
-SPLIT_CONF="${PROJECT_ROOT}/nginx/split.conf"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
