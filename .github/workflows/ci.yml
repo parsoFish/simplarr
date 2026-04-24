@@ -45,11 +45,14 @@ jobs:
       - name: Run PSScriptAnalyzer against all .ps1 files
         shell: pwsh
         run: |
+          # Settings file pins severity + rule exclusions so CI and local
+          # pwsh invocations agree. See .github/linters/PSScriptAnalyzerSettings.psd1.
           Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $settings = Join-Path $PWD '.github/linters/PSScriptAnalyzerSettings.psd1'
           $ps1Files = Get-ChildItem -Recurse -Filter "*.ps1" |
             Where-Object { $_.FullName -notmatch '[/\\]\.git[/\\]' }
           $findings = $ps1Files | ForEach-Object {
-            Invoke-ScriptAnalyzer -Path $_.FullName -Severity @('Warning', 'Error')
+            Invoke-ScriptAnalyzer -Path $_.FullName -Settings $settings
           }
           if ($findings) {
             $findings | Format-List
