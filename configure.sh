@@ -558,7 +558,7 @@ add_radarr_to_overseerr() {
     existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/radarr" || true)
     local radarr_id=""
     if echo "$existing" | grep -q '"id"'; then
-        radarr_id=$(echo "$existing" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        radarr_id=$(echo "$existing" | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
         log_info "Radarr already configured in Overseerr. Updating existing configuration..."
     fi
 
@@ -602,12 +602,12 @@ add_radarr_to_overseerr() {
         response=$(curl -s -X PUT "${OVERSEERR_URL}/api/v1/settings/radarr/${radarr_id}" \
             -H "Content-Type: application/json" \
             -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$radarr_config")
+            -d "$radarr_config" || true)
     else
         response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
             -H "Content-Type: application/json" \
             -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$radarr_config")
+            -d "$radarr_config" || true)
     fi
 
     if echo "$response" | grep -q '"id"'; then
@@ -631,7 +631,7 @@ add_sonarr_to_overseerr() {
     existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/sonarr" || true)
     local sonarr_id=""
     if echo "$existing" | grep -q '"id"'; then
-        sonarr_id=$(echo "$existing" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        sonarr_id=$(echo "$existing" | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
         log_info "Sonarr already configured in Overseerr. Updating existing configuration..."
     fi
 
@@ -675,12 +675,12 @@ add_sonarr_to_overseerr() {
         response=$(curl -s -X PUT "${OVERSEERR_URL}/api/v1/settings/sonarr/${sonarr_id}" \
             -H "Content-Type: application/json" \
             -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$sonarr_config")
+            -d "$sonarr_config" || true)
     else
         response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
             -H "Content-Type: application/json" \
             -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$sonarr_config")
+            -d "$sonarr_config" || true)
     fi
 
     if echo "$response" | grep -q '"id"'; then
