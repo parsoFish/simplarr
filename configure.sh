@@ -553,12 +553,13 @@ add_radarr_to_overseerr() {
 
     log_info "Adding Radarr to Overseerr..."
 
-    # GET-before-POST: skip if Radarr already configured
+    # GET-before-POST: check if Radarr already configured
     local existing
-    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/radarr")
+    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/radarr" || true)
+    local radarr_id=""
     if echo "$existing" | grep -q '"id"'; then
-        log_info "Radarr already configured in Overseerr (skipping)"
-        return 0
+        radarr_id=$(echo "$existing" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        log_info "Radarr already configured in Overseerr. Updating existing configuration..."
     fi
 
     # Get Radarr quality profiles
@@ -597,16 +598,23 @@ add_radarr_to_overseerr() {
     }"
 
     local response
-    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: ${overseerr_api_key}" \
-        -d "$radarr_config")
+    if [ -n "$radarr_id" ]; then
+        response=$(curl -s -X PUT "${OVERSEERR_URL}/api/v1/settings/radarr/${radarr_id}" \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${overseerr_api_key}" \
+            -d "$radarr_config")
+    else
+        response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${overseerr_api_key}" \
+            -d "$radarr_config")
+    fi
 
     if echo "$response" | grep -q '"id"'; then
-        log_success "Radarr added to Overseerr"
+        log_success "Radarr configured in Overseerr"
         return 0
     else
-        log_error "Failed to add Radarr to Overseerr"
+        log_error "Failed to configure Radarr in Overseerr"
         return 1
     fi
 }
@@ -618,12 +626,13 @@ add_sonarr_to_overseerr() {
 
     log_info "Adding Sonarr to Overseerr..."
 
-    # GET-before-POST: skip if Sonarr already configured
+    # GET-before-POST: check if Sonarr already configured
     local existing
-    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/sonarr")
+    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/sonarr" || true)
+    local sonarr_id=""
     if echo "$existing" | grep -q '"id"'; then
-        log_info "Sonarr already configured in Overseerr (skipping)"
-        return 0
+        sonarr_id=$(echo "$existing" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+        log_info "Sonarr already configured in Overseerr. Updating existing configuration..."
     fi
 
     # Get Sonarr quality profiles
@@ -662,16 +671,23 @@ add_sonarr_to_overseerr() {
     }"
 
     local response
-    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
-        -H "Content-Type: application/json" \
-        -H "X-Api-Key: ${overseerr_api_key}" \
-        -d "$sonarr_config")
+    if [ -n "$sonarr_id" ]; then
+        response=$(curl -s -X PUT "${OVERSEERR_URL}/api/v1/settings/sonarr/${sonarr_id}" \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${overseerr_api_key}" \
+            -d "$sonarr_config")
+    else
+        response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
+            -H "Content-Type: application/json" \
+            -H "X-Api-Key: ${overseerr_api_key}" \
+            -d "$sonarr_config")
+    fi
 
     if echo "$response" | grep -q '"id"'; then
-        log_success "Sonarr added to Overseerr"
+        log_success "Sonarr configured in Overseerr"
         return 0
     else
-        log_error "Failed to add Sonarr to Overseerr"
+        log_error "Failed to configure Sonarr in Overseerr"
         return 1
     fi
 }

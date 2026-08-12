@@ -570,11 +570,12 @@ function Add-RadarrToOverseerr {
     Write-Info "Adding Radarr to Overseerr..."
     
     try {
-        # GET-before-POST: skip if Radarr already configured
+        # GET-before-POST: check if Radarr already configured
         $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Headers @{ "X-Api-Key" = $OverseerrApiKey } -ErrorAction SilentlyContinue
-        if ($null -ne $existing -and $existing.Count -gt 0) {
-            Write-Info "Radarr already configured in Overseerr (skipping)"
-            return $true
+        $radarrId = $null
+        if ($null -ne $existing -and $existing.Count -gt 0 -and $null -ne $existing[0].id) {
+            $radarrId = $existing[0].id
+            Write-Info "Radarr already configured in Overseerr. Updating existing configuration..."
         }
 
         # Get Radarr profiles and root folders
@@ -603,10 +604,17 @@ function Add-RadarrToOverseerr {
             preventSearch = $false
         }
         
-        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Method Post -Headers @{
-            "Content-Type" = "application/json"
-            "X-Api-Key" = $OverseerrApiKey
-        } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        if ($null -ne $radarrId) {
+            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr/$radarrId" -Method Put -Headers @{
+                "Content-Type" = "application/json"
+                "X-Api-Key" = $OverseerrApiKey
+            } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        } else {
+            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Method Post -Headers @{
+                "Content-Type" = "application/json"
+                "X-Api-Key" = $OverseerrApiKey
+            } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        }
         
         Write-Success "Radarr added to Overseerr"
         return $true
@@ -626,11 +634,12 @@ function Add-SonarrToOverseerr {
     Write-Info "Adding Sonarr to Overseerr..."
     
     try {
-        # GET-before-POST: skip if Sonarr already configured
+        # GET-before-POST: check if Sonarr already configured
         $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Headers @{ "X-Api-Key" = $OverseerrApiKey } -ErrorAction SilentlyContinue
-        if ($null -ne $existing -and $existing.Count -gt 0) {
-            Write-Info "Sonarr already configured in Overseerr (skipping)"
-            return $true
+        $sonarrId = $null
+        if ($null -ne $existing -and $existing.Count -gt 0 -and $null -ne $existing[0].id) {
+            $sonarrId = $existing[0].id
+            Write-Info "Sonarr already configured in Overseerr. Updating existing configuration..."
         }
 
         # Get Sonarr profiles and root folders
@@ -659,10 +668,17 @@ function Add-SonarrToOverseerr {
             enableSeasonFolders = $true
         }
         
-        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Method Post -Headers @{
-            "Content-Type" = "application/json"
-            "X-Api-Key" = $OverseerrApiKey
-        } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        if ($null -ne $sonarrId) {
+            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr/$sonarrId" -Method Put -Headers @{
+                "Content-Type" = "application/json"
+                "X-Api-Key" = $OverseerrApiKey
+            } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        } else {
+            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Method Post -Headers @{
+                "Content-Type" = "application/json"
+                "X-Api-Key" = $OverseerrApiKey
+            } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+        }
         
         Write-Success "Sonarr added to Overseerr"
         return $true

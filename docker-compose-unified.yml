@@ -160,8 +160,6 @@ services:
   nginx:
     image: nginx:1.28.2-alpine3.23
     container_name: nginx
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
       - "443:443"
@@ -261,6 +259,10 @@ networks:
 #      retries: 5
 #      start_period: 60s
 #    restart: unless-stopped
+#    networks:
+#      default:
+#        aliases:
+#          - qbittorrent
 
 # -----------------------------------------------------------------------------
 # qBittorrent VPN Overrides
