@@ -1,4 +1,4 @@
-﻿# =============================================================================
+# =============================================================================
 # Simplarr Configuration Script (PowerShell)
 # =============================================================================
 # This script connects all your *arr services together using their APIs.
@@ -461,6 +461,7 @@ function Add-ProwlarrIndexer {
         fields = @(
             @{ name = "baseUrl"; value = $BaseUrl }
             @{ name = "baseSettings.limitsUnit"; value = 0 }
+            @{ name = "definitionFile"; value = $DefinitionName }
         )
         implementationName = $Name
         implementation = "Cardigann"
@@ -569,6 +570,13 @@ function Add-RadarrToOverseerr {
     Write-Info "Adding Radarr to Overseerr..."
     
     try {
+        # GET-before-POST: skip if Radarr already configured
+        $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Headers @{ "X-Api-Key" = $OverseerrApiKey } -ErrorAction SilentlyContinue
+        if ($null -ne $existing -and $existing.Count -gt 0) {
+            Write-Info "Radarr already configured in Overseerr (skipping)"
+            return $true
+        }
+
         # Get Radarr profiles and root folders
         $radarrProfiles = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
         $rootFolders = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
@@ -618,6 +626,13 @@ function Add-SonarrToOverseerr {
     Write-Info "Adding Sonarr to Overseerr..."
     
     try {
+        # GET-before-POST: skip if Sonarr already configured
+        $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Headers @{ "X-Api-Key" = $OverseerrApiKey } -ErrorAction SilentlyContinue
+        if ($null -ne $existing -and $existing.Count -gt 0) {
+            Write-Info "Sonarr already configured in Overseerr (skipping)"
+            return $true
+        }
+
         # Get Sonarr profiles and root folders
         $sonarrProfiles = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
         $rootFolders = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop

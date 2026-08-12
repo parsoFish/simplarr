@@ -434,7 +434,7 @@ add_indexer() {
     local definition_name="$4"
     local impl_name="${5:-${name}}"
 
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    if curl -s -f -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d "{
@@ -443,7 +443,8 @@ add_indexer() {
             \"name\": \"${name}\",
             \"fields\": [
                 {\"name\": \"baseUrl\", \"value\": \"${base_url}\"},
-                {\"name\": \"baseSettings.limitsUnit\", \"value\": 0}
+                {\"name\": \"baseSettings.limitsUnit\", \"value\": 0},
+                {\"name\": \"definitionFile\", \"value\": \"${definition_name}\"}
             ],
             \"implementationName\": \"${impl_name}\",
             \"implementation\": \"Cardigann\",
@@ -552,6 +553,14 @@ add_radarr_to_overseerr() {
 
     log_info "Adding Radarr to Overseerr..."
 
+    # GET-before-POST: skip if Radarr already configured
+    local existing
+    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/radarr")
+    if echo "$existing" | grep -q '"id"'; then
+        log_info "Radarr already configured in Overseerr (skipping)"
+        return 0
+    fi
+
     # Get Radarr quality profiles
     local profiles
     profiles=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
@@ -608,6 +617,14 @@ add_sonarr_to_overseerr() {
     local overseerr_api_key=$2
 
     log_info "Adding Sonarr to Overseerr..."
+
+    # GET-before-POST: skip if Sonarr already configured
+    local existing
+    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/sonarr")
+    if echo "$existing" | grep -q '"id"'; then
+        log_info "Sonarr already configured in Overseerr (skipping)"
+        return 0
+    fi
 
     # Get Sonarr quality profiles
     local profiles
