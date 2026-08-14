@@ -508,16 +508,47 @@ function Add-ProwlarrPublicIndexer {
     
     # NOTE: 1337x and EZTV removed - often blocked (Cloudflare, geo-blocking in AU/UK)
     # Add them manually in Prowlarr if they work in your region
+    # NOTE: TorrentGalaxy removed - the site shut down and Prowlarr deleted the
+    # definition upstream, so adding it fails with HTTP 500 for every user.
     $indexers = @(
         @{ Name = "YTS"; Url = "https://yts.mx"; Definition = "yts" }
         @{ Name = "The Pirate Bay"; Url = "https://thepiratebay.org"; Definition = "thepiratebay" }
-        @{ Name = "TorrentGalaxy"; Url = "https://torrentgalaxy.to"; Definition = "torrentgalaxy" }
         @{ Name = "Nyaa.si"; Url = "https://nyaa.si"; Definition = "nyaasi" }
-        @{ Name = "LimeTorrents"; Url = "https://www.limetorrents.lol"; Definition = "limetorrents" }
+        @{ Name = "LimeTorrents"; Url = "https://www.limetorrents.fun"; Definition = "limetorrents" }
     )
-    
+
+    # GET-before-POST: fetch existing indexers once to detect duplicates
+    # (parity with add_public_indexers in configure.sh)
+    $existingNames = @()
+    try {
+        $existingNames = @(Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/indexer" `
+            -Headers @{ "X-Api-Key" = $ApiKey } -ErrorAction Stop | ForEach-Object { $_.name })
+    }
+    catch {
+        Write-WarningMessage "Could not list existing Prowlarr indexers: $($_.Exception.Message)"
+    }
+
+    $added = 0
+    $skipped = 0
+    $failed = 0
     foreach ($indexer in $indexers) {
-        Add-ProwlarrIndexer -ApiKey $ApiKey -Name $indexer.Name -BaseUrl $indexer.Url -DefinitionName $indexer.Definition
+        if ($existingNames -contains $indexer.Name) {
+            Write-Info "$($indexer.Name) already configured in Prowlarr (skipping)"
+            $skipped++
+            continue
+        }
+        if (Add-ProwlarrIndexer -ApiKey $ApiKey -Name $indexer.Name -BaseUrl $indexer.Url -DefinitionName $indexer.Definition) {
+            $added++
+        } else {
+            $failed++
+        }
+    }
+
+    # Honest summary - Prowlarr validates each indexer against the live site
+    # on add, so geo-blocked/unreachable sites fail here (issue #29).
+    Write-Info "Indexers: $added added, $skipped already present, $failed failed"
+    if ($failed -gt 0) {
+        Write-WarningMessage "Failed indexers are usually geo-blocked or down. If your ISP blocks torrent sites, route Prowlarr through a VPN or add indexers manually in the Prowlarr UI."
     }
 }
 
@@ -545,12 +576,17 @@ function Sync-ProwlarrIndexer {
 
 function Get-OverseerrApiKey {
     Write-Info "Retrieving Overseerr API key..."
-    
-    # API key is stored in settings.json after Plex OAuth sign-in
-    $settingsPath = Join-Path $env:DOCKER_CONFIG "overseerr\settings.json"
+
+    # API key is stored in settings.json after Plex OAuth sign-in.
+    # Use the resolved $ConfigDir (falls back to .\configs, upgraded to
+    # DOCKER_CONFIG in the main flow) — raw $env:DOCKER_CONFIG is unset when
+    # the script is run without exporting .env (issue #29).
+    $settingsPath = Join-Path $ConfigDir "overseerr\settings.json"
     
     if (-not (Test-Path $settingsPath)) {
-        Write-WarningMessage "Overseerr settings.json not found. User must sign in with Plex first."
+        Write-WarningMessage "Overseerr settings.json not found at $settingsPath."
+        Write-Info "If you have not signed in yet: sign in to Overseerr with Plex first."
+        Write-Info "If you HAVE signed in: set DOCKER_CONFIG (or -ConfigDir) to your config directory and re-run."
         return $null
     }
     
@@ -636,6 +672,8 @@ function Add-RadarrToOverseerr {
             useSsl = $false
             baseUrl = ""
             activeProfileId = $radarrProfiles[0].id
+            # Overseerr's API schema requires activeProfileName as well (issue #29)
+            activeProfileName = $radarrProfiles[0].name
             activeDirectory = $rootFolders[0].path
             is4k = $false
             minimumAvailability = "released"
@@ -698,6 +736,8 @@ function Add-SonarrToOverseerr {
             useSsl = $false
             baseUrl = ""
             activeProfileId = $sonarrProfiles[0].id
+            # Overseerr's API schema requires activeProfileName as well (issue #29)
+            activeProfileName = $sonarrProfiles[0].name
             activeDirectory = $rootFolders[0].path
             is4k = $false
             isDefault = $true
@@ -723,26 +763,29 @@ function Add-SonarrToOverseerr {
 
 function Enable-OverseerrWatchlistSync {
     param([string]$OverseerrApiKey)
-    
-    Write-Info "Enabling Plex Watchlist sync in Overseerr..."
-    
+
+    Write-Info "Enabling Overseerr watchlist sync for the owner account..."
+
+    # Watchlist sync is a PER-USER setting (POST /api/v1/user/{id}/settings/main),
+    # not a field on /api/v1/settings/main — the previous implementation set
+    # autoApproveMovie/autoApproveSeries properties that do not exist on the
+    # main settings object, so it threw on every run (issue #29). The owner
+    # (user 1, created by the Plex sign-in) auto-approves implicitly as admin.
     try {
-        # Get current main settings
-        $mainSettings = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/main" -Method Get -Headers @{
-            "X-Api-Key" = $OverseerrApiKey
-        } -ErrorAction Stop
-        
-        # Update to enable watchlist sync and auto-approval
-        $mainSettings.autoApproveMovie = $true
-        $mainSettings.autoApproveSeries = $true
-        
-        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/main" -Method Post -Headers @{
+        $body = @{ watchlistSyncMovies = $true; watchlistSyncTv = $true } | ConvertTo-Json
+
+        $response = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/user/1/settings/main" -Method Post -Headers @{
             "Content-Type" = "application/json"
             "X-Api-Key" = $OverseerrApiKey
-        } -Body ($mainSettings | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        
-        Write-Success "Watchlist sync enabled with auto-approval"
-        return $true
+        } -Body $body -ErrorAction Stop
+
+        if ($response.watchlistSyncMovies -eq $true) {
+            Write-Success "Watchlist sync enabled (movies + TV) for the owner account"
+            return $true
+        }
+
+        Write-WarningMessage "Could not enable watchlist sync (unexpected response)"
+        return $false
     }
     catch {
         Write-WarningMessage "Could not enable watchlist sync: $($_.Exception.Message)"

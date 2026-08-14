@@ -160,6 +160,11 @@ services:
   nginx:
     image: nginx:1.28.2-alpine3.23
     container_name: nginx
+    # host.docker.internal exists only on Docker Desktop; native Linux Docker
+    # needs this explicit mapping or nginx crash-loops with
+    # 'host not found in upstream "host.docker.internal"' (issue #28).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
       - "443:443"

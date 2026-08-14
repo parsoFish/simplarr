@@ -10,10 +10,10 @@
 #
 # Acceptance criteria tested here:
 #   1. $IndexerDefinitions is defined at script scope (outside any function)
-#   2. $IndexerDefinitions contains exactly 5 entries
+#   2. $IndexerDefinitions contains exactly 4 entries
 #   3. Each entry has the required keys: Name, Url/BaseUrl, Definition/DefinitionName
-#   4. All 5 expected indexers are present (YTS, The Pirate Bay, TorrentGalaxy,
-#      Nyaa.si, LimeTorrents) with correct URLs and definition names
+#   4. All 4 expected indexers are present (YTS, The Pirate Bay, Nyaa.si,
+#      LimeTorrents) with correct URLs and definition names
 #   5. Add-ProwlarrPublicIndexer references $IndexerDefinitions (not a local $indexers)
 #   6. Add-ProwlarrPublicIndexer no longer defines a local $indexers = @(...) block
 #   7. Invoke-RestMethod is called exactly once per $IndexerDefinitions entry with a
@@ -41,9 +41,8 @@ BeforeAll {
     $script:ExpectedIndexers = @(
         @{ Name = 'YTS';            Url = 'https://yts.mx';               Definition = 'yts'            }
         @{ Name = 'The Pirate Bay'; Url = 'https://thepiratebay.org';     Definition = 'thepiratebay'   }
-        @{ Name = 'TorrentGalaxy'; Url = 'https://torrentgalaxy.to';     Definition = 'torrentgalaxy'  }
         @{ Name = 'Nyaa.si';        Url = 'https://nyaa.si';              Definition = 'nyaasi'         }
-        @{ Name = 'LimeTorrents';   Url = 'https://www.limetorrents.lol'; Definition = 'limetorrents'   }
+        @{ Name = 'LimeTorrents';   Url = 'https://www.limetorrents.fun'; Definition = 'limetorrents'   }
     )
 }
 
@@ -85,8 +84,8 @@ Describe 'configure.ps1 - $IndexerDefinitions entry count' {
         }
         $arrayLiteral = $match.Groups[1].Value
         $nameCount = ([regex]::Matches($arrayLiteral, '\bName\s*=')).Count
-        $nameCount | Should -Be 5 `
-            -Because 'Exactly 5 public indexers are defined: YTS, The Pirate Bay, TorrentGalaxy, Nyaa.si, LimeTorrents'
+        $nameCount | Should -Be 4 `
+            -Because 'Exactly 4 public indexers are defined: YTS, The Pirate Bay, Nyaa.si, LimeTorrents (TorrentGalaxy removed - site shut down)'
     }
 }
 
@@ -133,14 +132,13 @@ Describe 'configure.ps1 - $IndexerDefinitions entry schema' {
 # 4. All 5 expected indexers are present with correct URLs and definition names
 # =============================================================================
 
-Describe 'configure.ps1 - all 5 expected indexers present in $IndexerDefinitions' {
+Describe 'configure.ps1 - all 4 expected indexers present in $IndexerDefinitions' {
 
     foreach ($expected in @(
         @{ Name = 'YTS';            Url = 'https://yts.mx';               Definition = 'yts'           }
         @{ Name = 'The Pirate Bay'; Url = 'https://thepiratebay.org';     Definition = 'thepiratebay'  }
-        @{ Name = 'TorrentGalaxy'; Url = 'https://torrentgalaxy.to';     Definition = 'torrentgalaxy' }
         @{ Name = 'Nyaa.si';        Url = 'https://nyaa.si';              Definition = 'nyaasi'        }
-        @{ Name = 'LimeTorrents';   Url = 'https://www.limetorrents.lol'; Definition = 'limetorrents'  }
+        @{ Name = 'LimeTorrents';   Url = 'https://www.limetorrents.fun'; Definition = 'limetorrents'  }
     )) {
         Context "indexer: $($expected.Name)" {
 

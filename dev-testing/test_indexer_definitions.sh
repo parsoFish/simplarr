@@ -9,7 +9,7 @@
 # Test Phases:
 #   1  Array Presence        — $IndexerDefinitions must be defined at script scope
 #   2  Array Structure       — must not appear inside any function body
-#   3  Entry Count           — exactly 5 indexers in the array
+#   3  Entry Count           — exactly 4 indexers in the array
 #   4  Entry Schema          — each entry has Name, Url/BaseUrl, Definition keys
 #   5  Expected Indexers     — all 5 known indexers with correct URLs
 #   6  Function Loop         — Add-ProwlarrPublicIndexer references $IndexerDefinitions
@@ -125,10 +125,10 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 3: Entry count — exactly 5 indexers
+# Phase 3: Entry count — exactly 4 indexers
 # ---------------------------------------------------------------------------
 
-section "Phase 3: Entry Count (exactly 5 indexers)"
+section "Phase 3: Entry Count (exactly 4 indexers)"
 
 # Count Name = occurrences within the $IndexerDefinitions block
 INDEXER_DEF_LINE="$(grep -n '^\$IndexerDefinitions' "${CONFIGURE_PS1}" | head -1 | cut -d: -f1 || true)"
@@ -140,10 +140,10 @@ else
     ARRAY_BLOCK="$(awk "NR>=${INDEXER_DEF_LINE}" "${CONFIGURE_PS1}" | awk '/^\$IndexerDefinitions/,/^\)/' | head -40)"
     NAME_COUNT="$(echo "${ARRAY_BLOCK}" | grep -c 'Name\s*=' || true)"
 
-    if [[ "${NAME_COUNT}" -eq 5 ]]; then
-        pass "\$IndexerDefinitions contains exactly 5 indexer entries (Name count = ${NAME_COUNT})"
+    if [[ "${NAME_COUNT}" -eq 4 ]]; then
+        pass "\$IndexerDefinitions contains exactly 4 indexer entries (Name count = ${NAME_COUNT})"
     else
-        fail "\$IndexerDefinitions must contain exactly 5 indexers; found ${NAME_COUNT} Name keys in the array block"
+        fail "\$IndexerDefinitions must contain exactly 4 indexers; found ${NAME_COUNT} Name keys in the array block"
     fi
 fi
 
@@ -185,23 +185,22 @@ fi
 
 section "Phase 5: Expected Indexers Present (name, URL, definition name)"
 
+# NOTE: TorrentGalaxy removed — site shut down, Prowlarr deleted the definition.
 declare -A INDEXER_URLS=(
     ["YTS"]="yts.mx"
     ["The Pirate Bay"]="thepiratebay.org"
-    ["TorrentGalaxy"]="torrentgalaxy.to"
     ["Nyaa.si"]="nyaa.si"
-    ["LimeTorrents"]="limetorrents.lol"
+    ["LimeTorrents"]="limetorrents.fun"
 )
 
 declare -A INDEXER_DEFS=(
     ["YTS"]="yts"
     ["The Pirate Bay"]="thepiratebay"
-    ["TorrentGalaxy"]="torrentgalaxy"
     ["Nyaa.si"]="nyaasi"
     ["LimeTorrents"]="limetorrents"
 )
 
-for indexer_name in "YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa.si" "LimeTorrents"; do
+for indexer_name in "YTS" "The Pirate Bay" "Nyaa.si" "LimeTorrents"; do
     expected_url="${INDEXER_URLS[$indexer_name]}"
     expected_def="${INDEXER_DEFS[$indexer_name]}"
 
@@ -279,8 +278,8 @@ else
     fail "Add-ProwlarrPublicIndexer function was accidentally removed from configure.ps1"
 fi
 
-# The 5 URLs must still appear somewhere in configure.ps1 (might be in the array or elsewhere)
-for expected_url in "yts.mx" "thepiratebay.org" "torrentgalaxy.to" "nyaa.si" "limetorrents"; do
+# The 4 URLs must still appear somewhere in configure.ps1 (might be in the array or elsewhere)
+for expected_url in "yts.mx" "thepiratebay.org" "nyaa.si" "limetorrents"; do
     if grep -q "${expected_url}" "${CONFIGURE_PS1}"; then
         pass "URL fragment '${expected_url}' is still referenced in configure.ps1"
     else
