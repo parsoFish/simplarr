@@ -416,8 +416,12 @@ bash -c "
     echo \"\${_call_count}\" > '${_TMPDIR}/actual_calls.txt'
 " 2>/dev/null || true
 
-if [[ -f "${_TMPDIR}/actual_calls.txt" ]]; then
-    _ACTUAL_CALLS="$(cat "${_TMPDIR}/actual_calls.txt")"
+# Count indexer POSTs from the call log rather than the parent-shell counter:
+# add_indexer captures curl output via command substitution (a subshell), so
+# the parent _call_count never increments. Only POST calls carry a -d body,
+# which distinguishes them from the GET-before-POST duplicate check.
+if [[ -f "${_CALL_LOG}" ]]; then
+    _ACTUAL_CALLS="$(grep -c 'BODY=.' "${_CALL_LOG}" || true)"
 fi
 
 if [[ "${_ACTUAL_CALLS}" -eq "${_EXPECTED_CALLS}" ]] && [[ "${_EXPECTED_CALLS}" -eq 5 ]]; then

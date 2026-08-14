@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # Simplarr Configuration Script (PowerShell)
 # =============================================================================
 # This script connects all your *arr services together using their APIs.
@@ -484,7 +484,18 @@ function Add-ProwlarrIndexer {
         return $true
     }
     catch {
-        Write-WarningMessage "$Name may already exist"
+        # Duplicates are pre-filtered by the caller, so a failure here is
+        # almost always a real error (bad API key, validation, service not
+        # ready) and must surface the HTTP status instead of being shrugged off.
+        $statusCode = $null
+        if ($_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+        if ($statusCode) {
+            Write-WarningMessage "Failed to add $Name (HTTP $statusCode)"
+        } else {
+            Write-WarningMessage "Failed to add $Name (no HTTP response: $($_.Exception.Message))"
+        }
         return $false
     }
 }
@@ -561,23 +572,53 @@ function Get-OverseerrApiKey {
     }
 }
 
+# Check whether a service instance managed by this script already exists in
+# Overseerr's settings. Matches by hostname — Overseerr may hold several
+# Radarr/Sonarr instances (4K, anime) and only the one this script manages
+# may be considered; matching "the first id" would target the wrong instance.
+# Throws when the existence check itself fails — callers must NOT fall
+# through to POST on failure, that recreates the issue #29 duplicate-server
+# bug under a transient outage.
+function Test-OverseerrServiceConfigured {
+    param(
+        [string]$OverseerrApiKey,
+        [string]$Endpoint,
+        [string]$ServiceHost
+    )
+
+    $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/$Endpoint" `
+        -Headers @{ "X-Api-Key" = $OverseerrApiKey } `
+        -ErrorAction Stop
+    # @() guards the PS 5.1 single-element unwrap: Invoke-RestMethod turns a
+    # one-entry JSON array into a scalar PSCustomObject with no .Count
+    $configured = @(@($existing) | Where-Object { $_.hostname -eq $ServiceHost })
+    return ($configured.Count -gt 0)
+}
+
 function Add-RadarrToOverseerr {
     param(
         [string]$RadarrApiKey,
         [string]$OverseerrApiKey
     )
-    
-    Write-Info "Adding Radarr to Overseerr..."
-    
-    try {
-        # GET-before-POST: check if Radarr already configured
-        $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Headers @{ "X-Api-Key" = $OverseerrApiKey } -ErrorAction SilentlyContinue
-        $radarrId = $null
-        if ($null -ne $existing -and $existing.Count -gt 0 -and $null -ne $existing[0].id) {
-            $radarrId = $existing[0].id
-            Write-Info "Radarr already configured in Overseerr. Updating existing configuration..."
-        }
 
+    Write-Info "Adding Radarr to Overseerr..."
+
+    # Existence check by hostname — never update an existing entry: it may
+    # carry user customizations made in the Overseerr UI (quality profile,
+    # root folder, tags) that a defaults-built request would silently destroy
+    # (Overseerr's PUT replaces the entry, it does not merge).
+    try {
+        if (Test-OverseerrServiceConfigured -OverseerrApiKey $OverseerrApiKey -Endpoint "radarr" -ServiceHost $RadarrHost) {
+            Write-Info "Radarr already configured in Overseerr (already configured, skipping)"
+            return $true
+        }
+    }
+    catch {
+        Write-WarningMessage "Could not verify existing Radarr configuration in Overseerr: $($_.Exception.Message)"
+        return $false
+    }
+
+    try {
         # Get Radarr profiles and root folders
         $radarrProfiles = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
         $rootFolders = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
@@ -604,23 +645,16 @@ function Add-RadarrToOverseerr {
             preventSearch = $false
         }
         
-        if ($null -ne $radarrId) {
-            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr/$radarrId" -Method Put -Headers @{
-                "Content-Type" = "application/json"
-                "X-Api-Key" = $OverseerrApiKey
-            } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        } else {
-            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Method Post -Headers @{
-                "Content-Type" = "application/json"
-                "X-Api-Key" = $OverseerrApiKey
-            } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        }
-        
+        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/radarr" -Method Post -Headers @{
+            "Content-Type" = "application/json"
+            "X-Api-Key" = $OverseerrApiKey
+        } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+
         Write-Success "Radarr added to Overseerr"
         return $true
     }
     catch {
-        Write-WarningMessage "Could not add Radarr to Overseerr: $($_.Exception.Message)"
+        Write-WarningMessage "Failed to add Radarr to Overseerr: $($_.Exception.Message)"
         return $false
     }
 }
@@ -632,16 +666,21 @@ function Add-SonarrToOverseerr {
     )
     
     Write-Info "Adding Sonarr to Overseerr..."
-    
-    try {
-        # GET-before-POST: check if Sonarr already configured
-        $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Headers @{ "X-Api-Key" = $OverseerrApiKey } -ErrorAction SilentlyContinue
-        $sonarrId = $null
-        if ($null -ne $existing -and $existing.Count -gt 0 -and $null -ne $existing[0].id) {
-            $sonarrId = $existing[0].id
-            Write-Info "Sonarr already configured in Overseerr. Updating existing configuration..."
-        }
 
+    # Existence check by hostname — never update an existing entry (see
+    # Test-OverseerrServiceConfigured and Add-RadarrToOverseerr for rationale).
+    try {
+        if (Test-OverseerrServiceConfigured -OverseerrApiKey $OverseerrApiKey -Endpoint "sonarr" -ServiceHost $SonarrHost) {
+            Write-Info "Sonarr already configured in Overseerr (already configured, skipping)"
+            return $true
+        }
+    }
+    catch {
+        Write-WarningMessage "Could not verify existing Sonarr configuration in Overseerr: $($_.Exception.Message)"
+        return $false
+    }
+
+    try {
         # Get Sonarr profiles and root folders
         $sonarrProfiles = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
         $rootFolders = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/rootfolder" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
@@ -668,23 +707,16 @@ function Add-SonarrToOverseerr {
             enableSeasonFolders = $true
         }
         
-        if ($null -ne $sonarrId) {
-            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr/$sonarrId" -Method Put -Headers @{
-                "Content-Type" = "application/json"
-                "X-Api-Key" = $OverseerrApiKey
-            } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        } else {
-            Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Method Post -Headers @{
-                "Content-Type" = "application/json"
-                "X-Api-Key" = $OverseerrApiKey
-            } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        }
-        
+        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/sonarr" -Method Post -Headers @{
+            "Content-Type" = "application/json"
+            "X-Api-Key" = $OverseerrApiKey
+        } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
+
         Write-Success "Sonarr added to Overseerr"
         return $true
     }
     catch {
-        Write-WarningMessage "Could not add Sonarr to Overseerr: $($_.Exception.Message)"
+        Write-WarningMessage "Failed to add Sonarr to Overseerr: $($_.Exception.Message)"
         return $false
     }
 }

@@ -434,7 +434,11 @@ add_indexer() {
     local definition_name="$4"
     local impl_name="${5:-${name}}"
 
-    if curl -s -f -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    # Duplicates are pre-filtered by add_public_indexers, so a failure here is
+    # almost always a real error (bad API key, validation, service not ready)
+    # and must surface the HTTP status instead of being shrugged off.
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d "{
@@ -453,11 +457,17 @@ add_indexer() {
             \"tags\": [],
             \"priority\": 25,
             \"appProfileId\": 1
-        }" >/dev/null 2>&1; then
-        log_success "Added ${name}"
-    else
-        log_warn "${name} may already exist"
-    fi
+        }") || status="000"
+
+    case "${status}" in
+        2*)
+            log_success "Added ${name}"
+            ;;
+        *)
+            log_warn "Failed to add ${name} (HTTP ${status})"
+            ;;
+    esac
+    return 0
 }
 
 # Add popular public indexers to Prowlarr
@@ -546,6 +556,45 @@ initialize_overseerr() {
     fi
 }
 
+# Check whether a service instance managed by this script already exists in
+# Overseerr's settings. Matches by hostname — Overseerr may hold several
+# Radarr/Sonarr instances (4K, anime) and only the one this script manages
+# may be considered; matching "the first id" would target the wrong instance.
+# Parameters:
+#   $1 overseerr_api_key — Overseerr X-Api-Key
+#   $2 endpoint          — settings endpoint: "radarr" or "sonarr"
+#   $3 service_host      — hostname of the instance this script manages
+# Output: "configured" or "absent" on stdout
+# Returns: 1 when the existence check itself fails (no response or non-200) —
+#          callers must NOT fall through to POST on failure, that recreates
+#          the issue #29 duplicate-server bug under a transient outage
+check_overseerr_service() {
+    local overseerr_api_key="$1"
+    local endpoint="$2"
+    local service_host="$3"
+
+    local response
+    if ! response=$(curl -s -w '\n%{http_code}' \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        "${OVERSEERR_URL}/api/v1/settings/${endpoint}"); then
+        return 1
+    fi
+
+    local status="${response##*$'\n'}"
+    local body="${response%$'\n'*}"
+
+    if [ "$status" != "200" ]; then
+        return 1
+    fi
+
+    if echo "$body" | grep -q "\"hostname\" *: *\"${service_host}\""; then
+        echo "configured"
+    else
+        echo "absent"
+    fi
+    return 0
+}
+
 # Add Radarr to Overseerr
 add_radarr_to_overseerr() {
     local radarr_api_key=$1
@@ -553,13 +602,18 @@ add_radarr_to_overseerr() {
 
     log_info "Adding Radarr to Overseerr..."
 
-    # GET-before-POST: check if Radarr already configured
-    local existing
-    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/radarr" || true)
-    local radarr_id=""
-    if echo "$existing" | grep -q '"id"'; then
-        radarr_id=$(echo "$existing" | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
-        log_info "Radarr already configured in Overseerr. Updating existing configuration..."
+    # Existence check by hostname — never update an existing entry: it may
+    # carry user customizations made in the Overseerr UI (quality profile,
+    # root folder, tags) that a defaults-built request would silently destroy
+    # (Overseerr's PUT replaces the entry, it does not merge).
+    local existing_state
+    if ! existing_state=$(check_overseerr_service "${overseerr_api_key}" "radarr" "${RADARR_HOST}"); then
+        log_error "Could not verify existing Radarr configuration in Overseerr (service unreachable or returned an error)"
+        return 1
+    fi
+    if [ "$existing_state" = "configured" ]; then
+        log_info "Radarr already configured in Overseerr (already configured, skipping)"
+        return 0
     fi
 
     # Get Radarr quality profiles
@@ -598,23 +652,16 @@ add_radarr_to_overseerr() {
     }"
 
     local response
-    if [ -n "$radarr_id" ]; then
-        response=$(curl -s -X PUT "${OVERSEERR_URL}/api/v1/settings/radarr/${radarr_id}" \
-            -H "Content-Type: application/json" \
-            -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$radarr_config" || true)
-    else
-        response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
-            -H "Content-Type: application/json" \
-            -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$radarr_config" || true)
-    fi
+    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
+        -H "Content-Type: application/json" \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        -d "$radarr_config" || true)
 
     if echo "$response" | grep -q '"id"'; then
-        log_success "Radarr configured in Overseerr"
+        log_success "Radarr added to Overseerr"
         return 0
     else
-        log_error "Failed to configure Radarr in Overseerr"
+        log_error "Failed to add Radarr to Overseerr"
         return 1
     fi
 }
@@ -626,13 +673,16 @@ add_sonarr_to_overseerr() {
 
     log_info "Adding Sonarr to Overseerr..."
 
-    # GET-before-POST: check if Sonarr already configured
-    local existing
-    existing=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" "${OVERSEERR_URL}/api/v1/settings/sonarr" || true)
-    local sonarr_id=""
-    if echo "$existing" | grep -q '"id"'; then
-        sonarr_id=$(echo "$existing" | grep -o '"id": *[0-9]*' | head -1 | grep -o '[0-9]*')
-        log_info "Sonarr already configured in Overseerr. Updating existing configuration..."
+    # Existence check by hostname — never update an existing entry (see
+    # check_overseerr_service and add_radarr_to_overseerr for rationale).
+    local existing_state
+    if ! existing_state=$(check_overseerr_service "${overseerr_api_key}" "sonarr" "${SONARR_HOST}"); then
+        log_error "Could not verify existing Sonarr configuration in Overseerr (service unreachable or returned an error)"
+        return 1
+    fi
+    if [ "$existing_state" = "configured" ]; then
+        log_info "Sonarr already configured in Overseerr (already configured, skipping)"
+        return 0
     fi
 
     # Get Sonarr quality profiles
@@ -671,23 +721,16 @@ add_sonarr_to_overseerr() {
     }"
 
     local response
-    if [ -n "$sonarr_id" ]; then
-        response=$(curl -s -X PUT "${OVERSEERR_URL}/api/v1/settings/sonarr/${sonarr_id}" \
-            -H "Content-Type: application/json" \
-            -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$sonarr_config" || true)
-    else
-        response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
-            -H "Content-Type: application/json" \
-            -H "X-Api-Key: ${overseerr_api_key}" \
-            -d "$sonarr_config" || true)
-    fi
+    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
+        -H "Content-Type: application/json" \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        -d "$sonarr_config" || true)
 
     if echo "$response" | grep -q '"id"'; then
-        log_success "Sonarr configured in Overseerr"
+        log_success "Sonarr added to Overseerr"
         return 0
     else
-        log_error "Failed to configure Sonarr in Overseerr"
+        log_error "Failed to add Sonarr to Overseerr"
         return 1
     fi
 }
