@@ -101,6 +101,60 @@ function Write-ErrorMessage {
     Write-Host $Message
 }
 
+# Resolve the directory holding *arr / Overseerr config files. Precedence
+# (highest wins):
+#   1. -ConfigDir explicitly passed on the command line
+#   2. $env:DOCKER_CONFIG set in the process environment
+#   3. DOCKER_CONFIG=... read from the .env file next to this script — the
+#      file setup.ps1 writes. docker compose reads that .env automatically for
+#      ${DOCKER_CONFIG} volume substitution, but running .\configure.ps1 per
+#      the readme exports nothing, so without this step the script silently
+#      fell back to .\configs (issue #29, round 2).
+#   4. .\configs (the param default)
+function Resolve-ConfigDir {
+    param(
+        [string]$ConfigDir,
+        # Overridable for tests; $PSScriptRoot is empty when the function is
+        # loaded dynamically (e.g. via AST extraction in Pester suites).
+        [string]$ScriptRoot = $PSScriptRoot
+    )
+
+    if ($ConfigDir -ne ".\configs") {
+        return $ConfigDir
+    }
+
+    if ($env:DOCKER_CONFIG) {
+        return $env:DOCKER_CONFIG
+    }
+
+    $envFile = Join-Path $ScriptRoot ".env"
+    if (Test-Path $envFile) {
+        # Last matching line wins; Get-Content strips CR/LF per line, so no
+        # explicit CRLF handling is needed (unlike the bash implementation).
+        $lastMatch = $null
+        foreach ($line in Get-Content $envFile) {
+            if ($line -match '^DOCKER_CONFIG=(.*)$') {
+                $lastMatch = $matches[1]
+            }
+        }
+        if ($lastMatch) {
+            $value = $lastMatch.Trim() -replace '^["'']|["'']$', ''
+            if ($value) {
+                # Relative values (e.g. "./docker") resolve against this
+                # script's directory, matching how docker compose resolves
+                # the same .env value against the compose project directory.
+                if (-not [System.IO.Path]::IsPathRooted($value)) {
+                    $value = Join-Path $ScriptRoot ($value -replace '^\./', '')
+                }
+                Write-Info "Loaded DOCKER_CONFIG from .env: $value"
+                return $value
+            }
+        }
+    }
+
+    return ".\configs"
+}
+
 function Invoke-ConfigApi {
     param(
         [Parameter(Mandatory)]
@@ -578,15 +632,14 @@ function Get-OverseerrApiKey {
     Write-Info "Retrieving Overseerr API key..."
 
     # API key is stored in settings.json after Plex OAuth sign-in.
-    # Use the resolved $ConfigDir (falls back to .\configs, upgraded to
-    # DOCKER_CONFIG in the main flow) — raw $env:DOCKER_CONFIG is unset when
-    # the script is run without exporting .env (issue #29).
+    # Uses the script-scope $ConfigDir already resolved via Resolve-ConfigDir
+    # in the main flow (.env autoload included — issue #29).
     $settingsPath = Join-Path $ConfigDir "overseerr\settings.json"
     
     if (-not (Test-Path $settingsPath)) {
         Write-WarningMessage "Overseerr settings.json not found at $settingsPath."
         Write-Info "If you have not signed in yet: sign in to Overseerr with Plex first."
-        Write-Info "If you HAVE signed in: set DOCKER_CONFIG (or -ConfigDir) to your config directory and re-run."
+        Write-Info "If you HAVE signed in: check DOCKER_CONFIG in your .env file (auto-loaded) or pass -ConfigDir / set DOCKER_CONFIG to override, then re-run."
         return $null
     }
     
@@ -805,17 +858,13 @@ Write-Host "║  This script will wire up your *arr services automatically.     
 Write-Host "╚═══════════════════════════════════════════════════════════════════════╝" -ForegroundColor Blue
 Write-Host ""
 
-# Check if we should use local config files or wait for services
+# Check if we should use local config files or wait for services.
+# See Resolve-ConfigDir for the precedence chain, including .env autoload
+# (issue #29, round 2).
+$ConfigDir = Resolve-ConfigDir -ConfigDir $ConfigDir
 $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
 $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
 $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
-
-if ($env:DOCKER_CONFIG -and $ConfigDir -eq ".\configs") {
-    $ConfigDir = $env:DOCKER_CONFIG
-    $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
-    $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
-    $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
-}
 
 if (Test-Path $radarrConfig) {
     Write-Info "Found local config files, extracting API keys..."

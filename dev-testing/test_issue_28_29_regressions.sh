@@ -158,6 +158,7 @@ fi
 # ---------------------------------------------------------------------------
 section "Phase 3: #29 unit — get_overseerr_api_key"
 
+RESOLVE_DIR_FUNC="$(extract_sh_function "resolve_config_dir")"
 GET_KEY_FUNC="$(extract_sh_function "get_overseerr_api_key")"
 
 if [[ -z "${GET_KEY_FUNC}" ]]; then
@@ -188,6 +189,7 @@ EOF
         # shellcheck disable=SC2086
         env -i PATH="$PATH" $1 bash -c "
             log_info() { :; }; log_error() { :; }; log_success() { :; }
+            ${RESOLVE_DIR_FUNC}
             ${GET_KEY_FUNC}
             get_overseerr_api_key
         " 2>/dev/null
@@ -219,6 +221,87 @@ EOF
         fail "get_overseerr_api_key returned 0 for a missing settings.json"
     else
         pass "returns non-zero (without exiting) when settings.json is missing"
+    fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase 3b: Unit #29 round 2 — resolve_config_dir .env autoload
+# ---------------------------------------------------------------------------
+section "Phase 3b: #29 round 2 unit — resolve_config_dir .env autoload"
+
+if [[ -z "${RESOLVE_DIR_FUNC}" ]]; then
+    fail "resolve_config_dir() not found in configure.sh (issue #29 round 2: configure.sh must auto-load DOCKER_CONFIG from .env)"
+else
+    run_resolve_config_dir() {
+        # $1: env assignments, e.g. 'SCRIPT_DIR=/x DOCKER_CONFIG=/y' —
+        # deliberately word-split
+        # shellcheck disable=SC2086
+        env -i PATH="$PATH" $1 bash -c "
+            log_info() { :; }; log_error() { :; }; log_success() { :; }
+            ${RESOLVE_DIR_FUNC}
+            resolve_config_dir
+        " 2>/dev/null
+    }
+
+    # 3b-a — .env present, no env vars: the .env value must win over ./configs
+    mkdir -p "${_TMPDIR}/envtest"
+    printf 'PUID=1000\nDOCKER_CONFIG=%s/from-env-file\n' "${_TMPDIR}" \
+        > "${_TMPDIR}/envtest/.env"
+    if [[ "$(run_resolve_config_dir "SCRIPT_DIR=${_TMPDIR}/envtest")" == "${_TMPDIR}/from-env-file" ]]; then
+        pass "loads DOCKER_CONFIG from .env when no env vars are set"
+    else
+        fail "did not auto-load DOCKER_CONFIG from .env (issue #29 round 2: script fell back to ./configs despite valid .env)"
+    fi
+
+    # 3b-b — shell DOCKER_CONFIG must override .env
+    if [[ "$(run_resolve_config_dir "SCRIPT_DIR=${_TMPDIR}/envtest DOCKER_CONFIG=${_TMPDIR}/from-shell")" == "${_TMPDIR}/from-shell" ]]; then
+        pass "shell DOCKER_CONFIG overrides .env"
+    else
+        fail "shell DOCKER_CONFIG must take precedence over .env"
+    fi
+
+    # 3b-c — shell CONFIG_DIR outranks both DOCKER_CONFIG and .env
+    if [[ "$(run_resolve_config_dir "SCRIPT_DIR=${_TMPDIR}/envtest CONFIG_DIR=${_TMPDIR}/from-config-dir DOCKER_CONFIG=${_TMPDIR}/from-shell")" == "${_TMPDIR}/from-config-dir" ]]; then
+        pass "shell CONFIG_DIR outranks DOCKER_CONFIG and .env"
+    else
+        fail "CONFIG_DIR must be the top-precedence source"
+    fi
+
+    # 3b-d — no .env, no env vars: default must remain ./configs
+    mkdir -p "${_TMPDIR}/noenv"
+    if [[ "$(run_resolve_config_dir "SCRIPT_DIR=${_TMPDIR}/noenv")" == "./configs" ]]; then
+        pass "falls back to ./configs when no .env and no env vars"
+    else
+        fail "default fallback changed; must remain ./configs"
+    fi
+
+    # 3b-e — CRLF + quoted value + duplicate key: last line wins, CR/quotes
+    #        stripped (users hand-edit .env on Windows)
+    mkdir -p "${_TMPDIR}/crlf"
+    printf 'DOCKER_CONFIG=/first/stale\r\nDOCKER_CONFIG="%s/second/real"\r\n' "${_TMPDIR}" \
+        > "${_TMPDIR}/crlf/.env"
+    if [[ "$(run_resolve_config_dir "SCRIPT_DIR=${_TMPDIR}/crlf")" == "${_TMPDIR}/second/real" ]]; then
+        pass "last DOCKER_CONFIG line wins, CRLF and quotes stripped"
+    else
+        fail "must handle CRLF-edited .env, strip quotes, and prefer the last DOCKER_CONFIG= line"
+    fi
+
+    # 3b-f — relative DOCKER_CONFIG in .env resolves against SCRIPT_DIR, not
+    #        the caller's CWD (matches docker compose's project-dir semantics)
+    mkdir -p "${_TMPDIR}/relative"
+    printf 'DOCKER_CONFIG=./docker\n' > "${_TMPDIR}/relative/.env"
+    if [[ "$(cd /tmp && run_resolve_config_dir "SCRIPT_DIR=${_TMPDIR}/relative")" == "${_TMPDIR}/relative/docker" ]]; then
+        pass "relative DOCKER_CONFIG in .env resolves against the script directory"
+    else
+        fail "relative DOCKER_CONFIG must resolve against SCRIPT_DIR, not the caller's CWD"
+    fi
+
+    # 3b-g — get_overseerr_api_key must use resolve_config_dir (shared chain,
+    #        no duplicated inline fallback)
+    if printf '%s' "${GET_KEY_FUNC}" | grep -q 'resolve_config_dir'; then
+        pass "get_overseerr_api_key delegates to resolve_config_dir"
+    else
+        fail "get_overseerr_api_key must build its path via resolve_config_dir (duplicated fallback chains diverge — that caused #29 round 1)"
     fi
 fi
 

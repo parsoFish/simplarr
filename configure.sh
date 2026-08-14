@@ -23,6 +23,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Script directory — used to locate the .env file setup.sh writes next to
+# this script (see resolve_config_dir)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default configuration - override with environment variables or arguments
 RADARR_URL="${RADARR_URL:-http://localhost:7878}"
 SONARR_URL="${SONARR_URL:-http://localhost:8989}"
@@ -97,6 +101,57 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[✗]${NC} $1"
+}
+
+# Resolve the directory holding *arr / Overseerr config files. Precedence
+# (highest wins):
+#   1. CONFIG_DIR set in the process environment
+#   2. DOCKER_CONFIG set in the process environment
+#   3. DOCKER_CONFIG=... read from the .env file next to this script — the
+#      file setup.sh writes. docker compose reads that .env automatically for
+#      ${DOCKER_CONFIG} volume substitution, but running ./configure.sh per
+#      the readme exports nothing, so without this step the script silently
+#      fell back to ./configs (issue #29, round 2).
+#   4. ./configs
+#
+# .env is parsed with grep/cut, not sourced: sourcing would execute
+# hand-edited file content as shell code and import unrelated variables
+# (RADARR_PORT etc.) that shadow this script's own overrides. Stdout is the
+# resolved path — log lines go to stderr so $(resolve_config_dir) stays clean.
+resolve_config_dir() {
+    if [ -n "${CONFIG_DIR:-}" ]; then
+        echo "$CONFIG_DIR"
+        return 0
+    fi
+
+    if [ -n "${DOCKER_CONFIG:-}" ]; then
+        echo "$DOCKER_CONFIG"
+        return 0
+    fi
+
+    local env_file="${SCRIPT_DIR:-.}/.env"
+    if [ -f "$env_file" ]; then
+        local raw
+        # Last matching line wins; tolerate CRLF line endings and quotes
+        # (users hand-edit .env on Windows).
+        raw=$(grep '^DOCKER_CONFIG=' "$env_file" 2>/dev/null | tail -n 1 \
+            | cut -d'=' -f2- | tr -d '\r"' | tr -d "'")
+
+        if [ -n "$raw" ]; then
+            # Relative values (e.g. "./docker") resolve against this script's
+            # directory, matching how docker compose resolves the same .env
+            # value against the compose project directory.
+            case "$raw" in
+                /*) ;;
+                *) raw="${SCRIPT_DIR:-.}/${raw#./}" ;;
+            esac
+            log_info "Loaded DOCKER_CONFIG from .env: ${raw}" >&2
+            echo "$raw"
+            return 0
+        fi
+    fi
+
+    echo "./configs"
 }
 
 # Wait for a service to be ready
@@ -536,16 +591,15 @@ sync_prowlarr_indexers() {
 get_overseerr_api_key() {
     log_info "Retrieving Overseerr API key..." >&2
 
-    # Same fallback chain as the *arr keys in main(): CONFIG_DIR is resolved
-    # there from CONFIG_DIR/DOCKER_CONFIG/./configs. Raw ${DOCKER_CONFIG} was
-    # empty when run per the readme (./configure.sh, .env not exported) and
-    # produced /overseerr/settings.json (issue #29).
-    local settings_path="${CONFIG_DIR:-${DOCKER_CONFIG:-./configs}}/overseerr/settings.json"
+    # Shared resolution with the *arr keys in main() — see resolve_config_dir
+    # for the full precedence chain including .env autoload (issue #29).
+    local settings_path
+    settings_path="$(resolve_config_dir)/overseerr/settings.json"
 
     if [ ! -f "$settings_path" ]; then
         log_error "Overseerr settings.json not found at ${settings_path}." >&2
         log_info "If you have not signed in yet: sign in to Overseerr with Plex first." >&2
-        log_info "If you HAVE signed in: set DOCKER_CONFIG (or CONFIG_DIR) to your config directory and re-run, e.g. DOCKER_CONFIG=/path/to/config ./configure.sh" >&2
+        log_info "If you HAVE signed in: check DOCKER_CONFIG in your .env file (auto-loaded) or set CONFIG_DIR/DOCKER_CONFIG to override, then re-run, e.g. DOCKER_CONFIG=/path/to/config ./configure.sh" >&2
         return 1
     fi
 
@@ -855,8 +909,9 @@ main() {
     log_success "Required tools found"
     echo ""
 
-    # Get config directory from environment or use default
-    CONFIG_DIR="${CONFIG_DIR:-${DOCKER_CONFIG:-./configs}}"
+    # Get config directory — see resolve_config_dir for the precedence chain,
+    # including .env autoload (issue #29, round 2)
+    CONFIG_DIR="$(resolve_config_dir)"
 
     # Check if we should use local config files or wait for services
     if [ -f "${CONFIG_DIR}/radarr/config.xml" ]; then

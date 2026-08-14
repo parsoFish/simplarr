@@ -123,3 +123,32 @@ Each fix was re-verified in the environment that reproduced the failure: nginx z
 - Any parser of service API responses must handle pretty-printed JSON and nested keys; the *arr APIs pretty-print by default.
 - Under `set -e`, every top-level integration call needs an explicit failure path — one flaky step must not silently cancel the rest of the run.
 - When a "graceful skip" is added to a test harness, record what it skips; those skips mark exactly where field bugs will live.
+
+---
+
+## Part 3 — Round 2 (2026-08-14): the `.env` autoload gap
+
+Reviewer feedback after the Part 1 fixes shipped: **#28 confirmed fixed** on the affected UGREEN NAS. #29's Overseerr step, however, still skipped.
+
+**Reported symptom** (screenshot from the reviewer's run):
+
+```
+[✗] Overseerr settings.json not found at ./configs/overseerr/settings.json.
+[INFO] If you have not signed in yet: sign in to Overseerr with Plex first.
+[✗] Could not retrieve Overseerr API key — skipping Overseerr configuration
+```
+
+— while their real config directory (containing `overseerr/`, `radarr/`, …) existed elsewhere and they *had* signed in.
+
+**Root cause.** `setup.sh` / `setup.ps1` write `DOCKER_CONFIG=<path>` into `.env`, and `docker compose` reads that file automatically for `${DOCKER_CONFIG}` volume substitution — but **`configure.sh` / `configure.ps1` never read `.env` at all**. Their resolution only consulted process environment variables (`CONFIG_DIR`/`DOCKER_CONFIG`), so running `./configure.sh` exactly as the readme instructs (nothing exported) always fell through to the `./configs` default. The Part 1 fix unified the fallback chain and improved the error hint, but still required the user to manually prefix `DOCKER_CONFIG=... ./configure.sh` — a step the readme never tells them to do.
+
+**Fix.**
+- `configure.sh` gains a top-level `resolve_config_dir()`; `configure.ps1` gains the mirror `Resolve-ConfigDir`. Precedence (highest wins): `CONFIG_DIR` env / explicit `-ConfigDir` param → `DOCKER_CONFIG` env → `DOCKER_CONFIG=` parsed from the `.env` next to the script (**new**) → `./configs`. The scripts log `Loaded DOCKER_CONFIG from .env: <path>` when the new branch wins.
+- `.env` is parsed with `grep`/`cut` (bash) / a line regex (PowerShell), **not** sourced: sourcing executes hand-edited file content as shell code and imports unrelated variables that shadow the scripts' own overrides. Last matching line wins; CRLF line endings and quotes are tolerated; relative values resolve against the script directory, matching how compose resolves them against the project directory.
+- Both "not found" hints now mention the `.env` autoload instead of only suggesting manual env vars.
+
+**Regression tests.** `dev-testing/test_issue_28_29_regressions.sh` Phase 3b unit-tests `resolve_config_dir` in an isolated env: `.env` autoload, env-var precedence, `./configs` default, CRLF/quoted/duplicate-line parsing, script-dir-relative resolution, and that `get_overseerr_api_key` delegates to the shared resolver. `dev-testing/Test-ResolveConfigDir.Tests.ps1` mirrors the same cases for PowerShell (Pester 5).
+
+**Also from the same feedback:** the reviewer's NAS reserves host ports 80/443 for its admin UI, forcing a manual nginx remap. `readme.md` now carries a "Port conflicts" note (with the `8282:80` / `8443:443` example), the nginx `ports:` blocks in the unified/pi compose files point at it, and the preflight scripts' port-conflict hint no longer references a non-existent `docker-compose.yml`.
+
+**Lesson (extends Part 2):** "run it exactly as the readme says, from a clean shell" is part of the reproduction — the Part 1 sandbox exercised `DOCKER_CONFIG` set and unset, but never the in-between state the readme actually produces: set for compose (via `.env`) yet invisible to the configure scripts.
