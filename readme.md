@@ -225,6 +225,8 @@ Once running, access services via direct ports or through the homepage:
 
 > **Note:** The homepage JavaScript automatically detects your server hostname and builds the correct URLs for all services.
 
+> **Port conflicts:** Simplarr's reverse proxy (nginx) publishes on host ports **80** and **443** by default. If your host already serves a web UI on those ports (common on NAS devices — e.g. Synology DSM or UGREEN UGOS reserve them for the admin interface), the nginx container will fail to start with a `port is already allocated` error. Change the host side of the port mapping under the `nginx` service in your `docker-compose-*.yml`, e.g. `"8282:80"` and `"8443:443"`, then access the homepage at `http://your-server-ip:8282/` instead. The same applies to any other published port already in use — `preflight.sh` / `preflight.ps1` will flag them before you start.
+
 ### Friendly Domain Names (Optional)
 
 Simplarr serves per-service hostnames like `plex.<TLD>`, `radarr.<TLD>`, `overseerr.<TLD>`, etc. The `<TLD>` is whatever you entered for `SUBDOMAIN_TLD` during setup (default: `local`).

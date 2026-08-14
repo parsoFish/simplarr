@@ -11,9 +11,9 @@
 #
 # Acceptance criteria tested here:
 #   1. INDEXER_DEFINITIONS is defined at script scope (outside any function)
-#   2. INDEXER_DEFINITIONS contains exactly 5 entries
+#   2. INDEXER_DEFINITIONS contains exactly 4 entries
 #   3. Each entry encodes the required fields (name, base_url, definition_name)
-#   4. All 5 known indexers are present with correct URLs and definition names
+#   4. All 4 known indexers are present with correct URLs and definition names
 #   5. add_public_indexers() references INDEXER_DEFINITIONS (not local parallel arrays)
 #   6. Local parallel arrays removed from add_public_indexers()
 #   7. Runtime: curl is invoked exactly once per INDEXER_DEFINITIONS entry with
@@ -163,11 +163,11 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Phase 3: Entry count — exactly 5 indexers
+# Phase 3: Entry count — exactly 4 indexers
 # TDD: SKIP if Phase 1 failed.
 # ---------------------------------------------------------------------------
 
-section "Phase 3: Entry Count (exactly 5 entries)"
+section "Phase 3: Entry Count (exactly 4 entries)"
 
 _INDEXER_DEF_LINE="$(grep -n '^INDEXER_DEFINITIONS=' "${CONFIGURE_SH}" | head -1 | cut -d: -f1 || true)"
 
@@ -180,10 +180,10 @@ else
     # Works for the expected format: "name|base_url|definition|impl" entries
     _ENTRY_COUNT="$(echo "${_ARRAY_BLOCK}" | grep -cE '^\s+"[^"]+\|' || true)"
 
-    if [[ "${_ENTRY_COUNT}" -eq 5 ]]; then
-        pass "INDEXER_DEFINITIONS contains exactly 5 entries (count=${_ENTRY_COUNT})"
+    if [[ "${_ENTRY_COUNT}" -eq 4 ]]; then
+        pass "INDEXER_DEFINITIONS contains exactly 4 entries (count=${_ENTRY_COUNT})"
     else
-        fail "INDEXER_DEFINITIONS must contain exactly 5 entries; found ${_ENTRY_COUNT} pipe-delimited entries in the array block"
+        fail "INDEXER_DEFINITIONS must contain exactly 4 entries; found ${_ENTRY_COUNT} pipe-delimited entries in the array block"
     fi
 fi
 
@@ -239,23 +239,22 @@ fi
 
 section "Phase 5: Expected Indexers Present (regression guard)"
 
+# NOTE: TorrentGalaxy removed — site shut down, Prowlarr deleted the definition.
 declare -A _EXPECTED_URLS=(
     ["YTS"]="yts.mx"
     ["The Pirate Bay"]="thepiratebay.org"
-    ["TorrentGalaxy"]="torrentgalaxy.to"
     ["Nyaa"]="nyaa.si"
-    ["LimeTorrents"]="limetorrents.lol"
+    ["LimeTorrents"]="limetorrents.fun"
 )
 
 declare -A _EXPECTED_DEFS=(
     ["YTS"]="yts"
     ["The Pirate Bay"]="thepiratebay"
-    ["TorrentGalaxy"]="torrentgalaxy"
     ["Nyaa"]="nyaasi"
     ["LimeTorrents"]="limetorrents"
 )
 
-for _iname in "YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa" "LimeTorrents"; do
+for _iname in "YTS" "The Pirate Bay" "Nyaa" "LimeTorrents"; do
     _url="${_EXPECTED_URLS[$_iname]}"
     _def="${_EXPECTED_DEFS[$_iname]}"
 
@@ -416,12 +415,16 @@ bash -c "
     echo \"\${_call_count}\" > '${_TMPDIR}/actual_calls.txt'
 " 2>/dev/null || true
 
-if [[ -f "${_TMPDIR}/actual_calls.txt" ]]; then
-    _ACTUAL_CALLS="$(cat "${_TMPDIR}/actual_calls.txt")"
+# Count indexer POSTs from the call log rather than the parent-shell counter:
+# add_indexer captures curl output via command substitution (a subshell), so
+# the parent _call_count never increments. Only POST calls carry a -d body,
+# which distinguishes them from the GET-before-POST duplicate check.
+if [[ -f "${_CALL_LOG}" ]]; then
+    _ACTUAL_CALLS="$(grep -c 'BODY=.' "${_CALL_LOG}" || true)"
 fi
 
-if [[ "${_ACTUAL_CALLS}" -eq "${_EXPECTED_CALLS}" ]] && [[ "${_EXPECTED_CALLS}" -eq 5 ]]; then
-    pass "curl invoked exactly 5 times — matches INDEXER_DEFINITIONS entry count (${_EXPECTED_CALLS})"
+if [[ "${_ACTUAL_CALLS}" -eq "${_EXPECTED_CALLS}" ]] && [[ "${_EXPECTED_CALLS}" -eq 4 ]]; then
+    pass "curl invoked exactly 4 times — matches INDEXER_DEFINITIONS entry count (${_EXPECTED_CALLS})"
 elif [[ "${_EXPECTED_CALLS}" -eq 0 ]]; then
     fail "INDEXER_DEFINITIONS has 0 entries (not yet implemented); curl was called ${_ACTUAL_CALLS} times from local arrays — expected 0 to enforce the refactor drives the count"
 else
@@ -436,9 +439,8 @@ printf "\n"
 declare -a _PAYLOAD_MATRIX=(
     "yts|yts.mx|test-key-abc"
     "thepiratebay|thepiratebay.org|test-key-abc"
-    "torrentgalaxy|torrentgalaxy.to|test-key-abc"
     "nyaasi|nyaa.si|test-key-abc"
-    "limetorrents|limetorrents.lol|test-key-abc"
+    "limetorrents|limetorrents.fun|test-key-abc"
 )
 
 if [[ ! -f "${_CALL_LOG}" ]]; then

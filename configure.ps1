@@ -101,6 +101,60 @@ function Write-ErrorMessage {
     Write-Host $Message
 }
 
+# Resolve the directory holding *arr / Overseerr config files. Precedence
+# (highest wins):
+#   1. -ConfigDir explicitly passed on the command line
+#   2. $env:DOCKER_CONFIG set in the process environment
+#   3. DOCKER_CONFIG=... read from the .env file next to this script — the
+#      file setup.ps1 writes. docker compose reads that .env automatically for
+#      ${DOCKER_CONFIG} volume substitution, but running .\configure.ps1 per
+#      the readme exports nothing, so without this step the script silently
+#      fell back to .\configs (issue #29, round 2).
+#   4. .\configs (the param default)
+function Resolve-ConfigDir {
+    param(
+        [string]$ConfigDir,
+        # Overridable for tests; $PSScriptRoot is empty when the function is
+        # loaded dynamically (e.g. via AST extraction in Pester suites).
+        [string]$ScriptRoot = $PSScriptRoot
+    )
+
+    if ($ConfigDir -ne ".\configs") {
+        return $ConfigDir
+    }
+
+    if ($env:DOCKER_CONFIG) {
+        return $env:DOCKER_CONFIG
+    }
+
+    $envFile = Join-Path $ScriptRoot ".env"
+    if (Test-Path $envFile) {
+        # Last matching line wins; Get-Content strips CR/LF per line, so no
+        # explicit CRLF handling is needed (unlike the bash implementation).
+        $lastMatch = $null
+        foreach ($line in Get-Content $envFile) {
+            if ($line -match '^DOCKER_CONFIG=(.*)$') {
+                $lastMatch = $matches[1]
+            }
+        }
+        if ($lastMatch) {
+            $value = $lastMatch.Trim() -replace '^["'']|["'']$', ''
+            if ($value) {
+                # Relative values (e.g. "./docker") resolve against this
+                # script's directory, matching how docker compose resolves
+                # the same .env value against the compose project directory.
+                if (-not [System.IO.Path]::IsPathRooted($value)) {
+                    $value = Join-Path $ScriptRoot ($value -replace '^\./', '')
+                }
+                Write-Info "Loaded DOCKER_CONFIG from .env: $value"
+                return $value
+            }
+        }
+    }
+
+    return ".\configs"
+}
+
 function Invoke-ConfigApi {
     param(
         [Parameter(Mandatory)]
@@ -461,6 +515,7 @@ function Add-ProwlarrIndexer {
         fields = @(
             @{ name = "baseUrl"; value = $BaseUrl }
             @{ name = "baseSettings.limitsUnit"; value = 0 }
+            @{ name = "definitionFile"; value = $DefinitionName }
         )
         implementationName = $Name
         implementation = "Cardigann"
@@ -483,7 +538,18 @@ function Add-ProwlarrIndexer {
         return $true
     }
     catch {
-        Write-WarningMessage "$Name may already exist"
+        # Duplicates are pre-filtered by the caller, so a failure here is
+        # almost always a real error (bad API key, validation, service not
+        # ready) and must surface the HTTP status instead of being shrugged off.
+        $statusCode = $null
+        if ($_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+        if ($statusCode) {
+            Write-WarningMessage "Failed to add $Name (HTTP $statusCode)"
+        } else {
+            Write-WarningMessage "Failed to add $Name (no HTTP response: $($_.Exception.Message))"
+        }
         return $false
     }
 }
@@ -496,16 +562,47 @@ function Add-ProwlarrPublicIndexer {
     
     # NOTE: 1337x and EZTV removed - often blocked (Cloudflare, geo-blocking in AU/UK)
     # Add them manually in Prowlarr if they work in your region
+    # NOTE: TorrentGalaxy removed - the site shut down and Prowlarr deleted the
+    # definition upstream, so adding it fails with HTTP 500 for every user.
     $indexers = @(
         @{ Name = "YTS"; Url = "https://yts.mx"; Definition = "yts" }
         @{ Name = "The Pirate Bay"; Url = "https://thepiratebay.org"; Definition = "thepiratebay" }
-        @{ Name = "TorrentGalaxy"; Url = "https://torrentgalaxy.to"; Definition = "torrentgalaxy" }
         @{ Name = "Nyaa.si"; Url = "https://nyaa.si"; Definition = "nyaasi" }
-        @{ Name = "LimeTorrents"; Url = "https://www.limetorrents.lol"; Definition = "limetorrents" }
+        @{ Name = "LimeTorrents"; Url = "https://www.limetorrents.fun"; Definition = "limetorrents" }
     )
-    
+
+    # GET-before-POST: fetch existing indexers once to detect duplicates
+    # (parity with add_public_indexers in configure.sh)
+    $existingNames = @()
+    try {
+        $existingNames = @(Invoke-RestMethod -Uri "$ProwlarrUrl/api/v1/indexer" `
+            -Headers @{ "X-Api-Key" = $ApiKey } -ErrorAction Stop | ForEach-Object { $_.name })
+    }
+    catch {
+        Write-WarningMessage "Could not list existing Prowlarr indexers: $($_.Exception.Message)"
+    }
+
+    $added = 0
+    $skipped = 0
+    $failed = 0
     foreach ($indexer in $indexers) {
-        Add-ProwlarrIndexer -ApiKey $ApiKey -Name $indexer.Name -BaseUrl $indexer.Url -DefinitionName $indexer.Definition
+        if ($existingNames -contains $indexer.Name) {
+            Write-Info "$($indexer.Name) already configured in Prowlarr (skipping)"
+            $skipped++
+            continue
+        }
+        if (Add-ProwlarrIndexer -ApiKey $ApiKey -Name $indexer.Name -BaseUrl $indexer.Url -DefinitionName $indexer.Definition) {
+            $added++
+        } else {
+            $failed++
+        }
+    }
+
+    # Honest summary - Prowlarr validates each indexer against the live site
+    # on add, so geo-blocked/unreachable sites fail here (issue #29).
+    Write-Info "Indexers: $added added, $skipped already present, $failed failed"
+    if ($failed -gt 0) {
+        Write-WarningMessage "Failed indexers are usually geo-blocked or down. If your ISP blocks torrent sites, route Prowlarr through a VPN or add indexers manually in the Prowlarr UI."
     }
 }
 
@@ -533,12 +630,16 @@ function Sync-ProwlarrIndexer {
 
 function Get-OverseerrApiKey {
     Write-Info "Retrieving Overseerr API key..."
-    
-    # API key is stored in settings.json after Plex OAuth sign-in
-    $settingsPath = Join-Path $env:DOCKER_CONFIG "overseerr\settings.json"
+
+    # API key is stored in settings.json after Plex OAuth sign-in.
+    # Uses the script-scope $ConfigDir already resolved via Resolve-ConfigDir
+    # in the main flow (.env autoload included — issue #29).
+    $settingsPath = Join-Path $ConfigDir "overseerr\settings.json"
     
     if (-not (Test-Path $settingsPath)) {
-        Write-WarningMessage "Overseerr settings.json not found. User must sign in with Plex first."
+        Write-WarningMessage "Overseerr settings.json not found at $settingsPath."
+        Write-Info "If you have not signed in yet: sign in to Overseerr with Plex first."
+        Write-Info "If you HAVE signed in: check DOCKER_CONFIG in your .env file (auto-loaded) or pass -ConfigDir / set DOCKER_CONFIG to override, then re-run."
         return $null
     }
     
@@ -560,14 +661,52 @@ function Get-OverseerrApiKey {
     }
 }
 
+# Check whether a service instance managed by this script already exists in
+# Overseerr's settings. Matches by hostname — Overseerr may hold several
+# Radarr/Sonarr instances (4K, anime) and only the one this script manages
+# may be considered; matching "the first id" would target the wrong instance.
+# Throws when the existence check itself fails — callers must NOT fall
+# through to POST on failure, that recreates the issue #29 duplicate-server
+# bug under a transient outage.
+function Test-OverseerrServiceConfigured {
+    param(
+        [string]$OverseerrApiKey,
+        [string]$Endpoint,
+        [string]$ServiceHost
+    )
+
+    $existing = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/$Endpoint" `
+        -Headers @{ "X-Api-Key" = $OverseerrApiKey } `
+        -ErrorAction Stop
+    # @() guards the PS 5.1 single-element unwrap: Invoke-RestMethod turns a
+    # one-entry JSON array into a scalar PSCustomObject with no .Count
+    $configured = @(@($existing) | Where-Object { $_.hostname -eq $ServiceHost })
+    return ($configured.Count -gt 0)
+}
+
 function Add-RadarrToOverseerr {
     param(
         [string]$RadarrApiKey,
         [string]$OverseerrApiKey
     )
-    
+
     Write-Info "Adding Radarr to Overseerr..."
-    
+
+    # Existence check by hostname — never update an existing entry: it may
+    # carry user customizations made in the Overseerr UI (quality profile,
+    # root folder, tags) that a defaults-built request would silently destroy
+    # (Overseerr's PUT replaces the entry, it does not merge).
+    try {
+        if (Test-OverseerrServiceConfigured -OverseerrApiKey $OverseerrApiKey -Endpoint "radarr" -ServiceHost $RadarrHost) {
+            Write-Info "Radarr already configured in Overseerr (already configured, skipping)"
+            return $true
+        }
+    }
+    catch {
+        Write-WarningMessage "Could not verify existing Radarr configuration in Overseerr: $($_.Exception.Message)"
+        return $false
+    }
+
     try {
         # Get Radarr profiles and root folders
         $radarrProfiles = Invoke-RestMethod -Uri "$RadarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $RadarrApiKey } -ErrorAction Stop
@@ -586,6 +725,8 @@ function Add-RadarrToOverseerr {
             useSsl = $false
             baseUrl = ""
             activeProfileId = $radarrProfiles[0].id
+            # Overseerr's API schema requires activeProfileName as well (issue #29)
+            activeProfileName = $radarrProfiles[0].name
             activeDirectory = $rootFolders[0].path
             is4k = $false
             minimumAvailability = "released"
@@ -599,12 +740,12 @@ function Add-RadarrToOverseerr {
             "Content-Type" = "application/json"
             "X-Api-Key" = $OverseerrApiKey
         } -Body ($radarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        
+
         Write-Success "Radarr added to Overseerr"
         return $true
     }
     catch {
-        Write-WarningMessage "Could not add Radarr to Overseerr: $($_.Exception.Message)"
+        Write-WarningMessage "Failed to add Radarr to Overseerr: $($_.Exception.Message)"
         return $false
     }
 }
@@ -616,7 +757,20 @@ function Add-SonarrToOverseerr {
     )
     
     Write-Info "Adding Sonarr to Overseerr..."
-    
+
+    # Existence check by hostname — never update an existing entry (see
+    # Test-OverseerrServiceConfigured and Add-RadarrToOverseerr for rationale).
+    try {
+        if (Test-OverseerrServiceConfigured -OverseerrApiKey $OverseerrApiKey -Endpoint "sonarr" -ServiceHost $SonarrHost) {
+            Write-Info "Sonarr already configured in Overseerr (already configured, skipping)"
+            return $true
+        }
+    }
+    catch {
+        Write-WarningMessage "Could not verify existing Sonarr configuration in Overseerr: $($_.Exception.Message)"
+        return $false
+    }
+
     try {
         # Get Sonarr profiles and root folders
         $sonarrProfiles = Invoke-RestMethod -Uri "$SonarrUrl/api/v3/qualityprofile" -Headers @{ "X-Api-Key" = $SonarrApiKey } -ErrorAction Stop
@@ -635,6 +789,8 @@ function Add-SonarrToOverseerr {
             useSsl = $false
             baseUrl = ""
             activeProfileId = $sonarrProfiles[0].id
+            # Overseerr's API schema requires activeProfileName as well (issue #29)
+            activeProfileName = $sonarrProfiles[0].name
             activeDirectory = $rootFolders[0].path
             is4k = $false
             isDefault = $true
@@ -648,38 +804,41 @@ function Add-SonarrToOverseerr {
             "Content-Type" = "application/json"
             "X-Api-Key" = $OverseerrApiKey
         } -Body ($sonarrConfig | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        
+
         Write-Success "Sonarr added to Overseerr"
         return $true
     }
     catch {
-        Write-WarningMessage "Could not add Sonarr to Overseerr: $($_.Exception.Message)"
+        Write-WarningMessage "Failed to add Sonarr to Overseerr: $($_.Exception.Message)"
         return $false
     }
 }
 
 function Enable-OverseerrWatchlistSync {
     param([string]$OverseerrApiKey)
-    
-    Write-Info "Enabling Plex Watchlist sync in Overseerr..."
-    
+
+    Write-Info "Enabling Overseerr watchlist sync for the owner account..."
+
+    # Watchlist sync is a PER-USER setting (POST /api/v1/user/{id}/settings/main),
+    # not a field on /api/v1/settings/main — the previous implementation set
+    # autoApproveMovie/autoApproveSeries properties that do not exist on the
+    # main settings object, so it threw on every run (issue #29). The owner
+    # (user 1, created by the Plex sign-in) auto-approves implicitly as admin.
     try {
-        # Get current main settings
-        $mainSettings = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/main" -Method Get -Headers @{
-            "X-Api-Key" = $OverseerrApiKey
-        } -ErrorAction Stop
-        
-        # Update to enable watchlist sync and auto-approval
-        $mainSettings.autoApproveMovie = $true
-        $mainSettings.autoApproveSeries = $true
-        
-        Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/settings/main" -Method Post -Headers @{
+        $body = @{ watchlistSyncMovies = $true; watchlistSyncTv = $true } | ConvertTo-Json
+
+        $response = Invoke-RestMethod -Uri "$OverseerrUrl/api/v1/user/1/settings/main" -Method Post -Headers @{
             "Content-Type" = "application/json"
             "X-Api-Key" = $OverseerrApiKey
-        } -Body ($mainSettings | ConvertTo-Json -Depth 10) -ErrorAction Stop | Out-Null
-        
-        Write-Success "Watchlist sync enabled with auto-approval"
-        return $true
+        } -Body $body -ErrorAction Stop
+
+        if ($response.watchlistSyncMovies -eq $true) {
+            Write-Success "Watchlist sync enabled (movies + TV) for the owner account"
+            return $true
+        }
+
+        Write-WarningMessage "Could not enable watchlist sync (unexpected response)"
+        return $false
     }
     catch {
         Write-WarningMessage "Could not enable watchlist sync: $($_.Exception.Message)"
@@ -699,17 +858,13 @@ Write-Host "║  This script will wire up your *arr services automatically.     
 Write-Host "╚═══════════════════════════════════════════════════════════════════════╝" -ForegroundColor Blue
 Write-Host ""
 
-# Check if we should use local config files or wait for services
+# Check if we should use local config files or wait for services.
+# See Resolve-ConfigDir for the precedence chain, including .env autoload
+# (issue #29, round 2).
+$ConfigDir = Resolve-ConfigDir -ConfigDir $ConfigDir
 $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
 $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
 $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
-
-if ($env:DOCKER_CONFIG -and $ConfigDir -eq ".\configs") {
-    $ConfigDir = $env:DOCKER_CONFIG
-    $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
-    $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
-    $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
-}
 
 if (Test-Path $radarrConfig) {
     Write-Info "Found local config files, extracting API keys..."

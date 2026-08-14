@@ -444,6 +444,129 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Phase 5: VPN Template Enablement — docker-compose-unified.yml
+#
+# Issue #28: when qbittorrent runs inside gluetun's network namespace, no
+# 'qbittorrent' DNS name exists on the network and nginx crash-loops with
+# 'host not found in upstream "qbittorrent"'. The fix is a network alias on
+# the gluetun service so nginx resolves 'qbittorrent' to gluetun.
+#
+# That fix only works if the commented VPN template can actually be enabled:
+# the template blocks must sit inside the top-level 'services:' section (a
+# block uncommented underneath 'networks:' is rejected by docker compose),
+# and the numbered enablement steps must tell the user about the alias and
+# about replacing the whole qbittorrent service.
+#
+# Checked invariants:
+#   5a  gluetun template block appears BEFORE the top-level networks: section
+#   5b  gluetun template carries the 'aliases: - qbittorrent' lines
+#   5c  numbered steps mention the qbittorrent alias
+#   5d  numbered steps say to comment out the whole qbittorrent service
+#   5e  simulated enablement (drop plain qbittorrent, uncomment VPN blocks)
+#       passes docker compose config
+#   5f  resolved config carries the qbittorrent alias and network_mode
+# ---------------------------------------------------------------------------
+
+section "Phase 5: VPN Template Enablement — docker-compose-unified.yml"
+
+printf "\n"
+info "Template placement, alias wiring, and simulated enablement"
+
+if [[ "${_UNIFIED_PRESENT}" != "true" ]]; then
+    skip "Phase 5 — docker-compose-unified.yml not found"
+else
+    # 5a — template must live inside services:, i.e. before top-level networks:
+    _P5_GLUETUN_LINE=$(grep -n '^#  gluetun:' "${UNIFIED_COMPOSE}" | head -1 | cut -d: -f1)
+    _P5_NETWORKS_LINE=$(grep -n '^networks:' "${UNIFIED_COMPOSE}" | head -1 | cut -d: -f1)
+    if [[ -n "${_P5_GLUETUN_LINE}" && -n "${_P5_NETWORKS_LINE}" \
+            && "${_P5_GLUETUN_LINE}" -lt "${_P5_NETWORKS_LINE}" ]]; then
+        pass "Phase 5a — gluetun template precedes top-level networks: (uncommenting lands in services:)"
+    else
+        fail "Phase 5a — gluetun template (line ${_P5_GLUETUN_LINE:-?}) must precede networks: (line ${_P5_NETWORKS_LINE:-?}); uncommenting it after networks: nests it there and compose rejects the file"
+    fi
+
+    # 5b — the #28 fix itself: gluetun answers to the 'qbittorrent' DNS name
+    if grep -qE '^#[[:space:]]+aliases:' "${UNIFIED_COMPOSE}" \
+            && grep -qE '^#[[:space:]]+-[[:space:]]+qbittorrent[[:space:]]*$' "${UNIFIED_COMPOSE}"; then
+        pass "Phase 5b — gluetun template carries 'aliases: - qbittorrent'"
+    else
+        fail "Phase 5b — gluetun template missing 'aliases: - qbittorrent' (nginx cannot resolve qbittorrent under VPN)"
+    fi
+
+    # 5c — the enablement steps must mention the alias so users with existing
+    # VPN setups know to splice it in
+    if grep -qE '^#[[:space:]]*[0-9]+\..*alias' "${UNIFIED_COMPOSE}"; then
+        pass "Phase 5c — numbered enablement steps mention the qbittorrent alias"
+    else
+        fail "Phase 5c — numbered enablement steps never mention the alias"
+    fi
+
+    # 5d — steps must say to comment out the whole qbittorrent service, not
+    # just its ports (leaving both uncommented duplicates the mapping key)
+    if grep -qiE '^#[[:space:]]*[0-9]+\..*qbittorrent.*service' "${UNIFIED_COMPOSE}"; then
+        pass "Phase 5d — numbered steps say to comment out the qbittorrent service"
+    else
+        fail "Phase 5d — numbered steps must say to comment out the whole qbittorrent service"
+    fi
+
+    # 5e/5f — simulate enablement and validate with docker compose config
+    _P5_DC_AVAILABLE=false
+    declare -a _P5_DC_CMD=()
+    if command -v docker &>/dev/null && docker compose version &>/dev/null 2>&1; then
+        _P5_DC_CMD=("docker" "compose")
+        _P5_DC_AVAILABLE=true
+    elif command -v docker-compose &>/dev/null; then
+        _P5_DC_CMD=("docker-compose")
+        _P5_DC_AVAILABLE=true
+    fi
+
+    if [[ "${_P5_DC_AVAILABLE}" != "true" ]]; then
+        skip "Phase 5e — simulated enablement — docker compose not available"
+        skip "Phase 5f — resolved alias/network_mode — docker compose not available"
+    else
+        if [[ -z "${_VPN_TMPDIR}" ]]; then
+            _VPN_TMPDIR="$(mktemp -d -t "simplarr-vpn-tdd-XXXXXX")"
+        fi
+
+        # Simulate the documented enablement steps:
+        #   - drop the plain qbittorrent service (user comments it out)
+        #   - uncomment every '#  ...' template line from the VPN section on
+        _P5_VPN_START=$(grep -n '^# VPN Configuration' "${UNIFIED_COMPOSE}" | head -1 | cut -d: -f1)
+        awk -v vpn_start="${_P5_VPN_START:-0}" '
+            NR >= vpn_start && vpn_start > 0 { vpn = 1 }
+            /^  qbittorrent:/ && !vpn { drop = 1 }
+            drop && /^$/ { drop = 0 }
+            !drop {
+                line = $0
+                if (vpn && line ~ /^#[[:space:]][[:space:]]/) { sub(/^#/, "", line) }
+                print line
+            }
+        ' "${UNIFIED_COMPOSE}" > "${_VPN_TMPDIR}/unified-vpn-enabled.yml"
+
+        _P5_CONF_OUT=""
+        if _P5_CONF_OUT=$("${_P5_DC_CMD[@]}" \
+                -f "${_VPN_TMPDIR}/unified-vpn-enabled.yml" \
+                --project-directory "${PROJECT_ROOT}" \
+                config 2>&1); then
+            pass "Phase 5e — simulated VPN enablement passes docker compose config"
+        else
+            fail "Phase 5e — simulated VPN enablement rejected by docker compose config: $(echo "${_P5_CONF_OUT}" | head -3 | tr '\n' ' ')"
+            _P5_CONF_OUT=""
+        fi
+
+        if [[ -n "${_P5_CONF_OUT}" ]]; then
+            if echo "${_P5_CONF_OUT}" | grep -qE 'aliases:' \
+                    && echo "${_P5_CONF_OUT}" | grep -qE '(-[[:space:]]+qbittorrent|qbittorrent[[:space:]]*$)' \
+                    && echo "${_P5_CONF_OUT}" | grep -qE 'network_mode:[[:space:]]+service:gluetun'; then
+                pass "Phase 5f — resolved config carries the qbittorrent alias and network_mode: service:gluetun"
+            else
+                fail "Phase 5f — resolved config missing the qbittorrent alias or network_mode: service:gluetun"
+            fi
+        fi
+    fi
+fi
+
+# ---------------------------------------------------------------------------
 # Summary
 # ---------------------------------------------------------------------------
 

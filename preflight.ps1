@@ -342,7 +342,7 @@ foreach ($port in $PortsToCheck.Keys | Sort-Object) {
     $service = $PortsToCheck[$port]
     
     if (Test-PortInUse -Port $port) {
-        Fail "Port $port is in use ($service)" "Stop the service using this port or change the port mapping in docker-compose.yml"
+        Fail "Port $port is in use ($service)" "Stop the service using this port or change the port mapping in your docker-compose-*.yml file"
     }
     else {
         Pass "Port $port is available ($service)"

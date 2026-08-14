@@ -23,6 +23,10 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Script directory — used to locate the .env file setup.sh writes next to
+# this script (see resolve_config_dir)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 # Default configuration - override with environment variables or arguments
 RADARR_URL="${RADARR_URL:-http://localhost:7878}"
 SONARR_URL="${SONARR_URL:-http://localhost:8989}"
@@ -61,12 +65,14 @@ QB_PASSWORD="${QB_PASSWORD:-}"
 
 # Prowlarr public indexer definitions — each entry encodes name|base_url|definition_name|impl_name.
 # Adding a new indexer requires only a new data entry here; no changes to add_public_indexers().
+# NOTE: TorrentGalaxy was removed — the site shut down and Prowlarr deleted
+# the definition upstream, so adding it fails with HTTP 500 for every user
+# ("Indexer definition for 'torrentgalaxy' does not exist").
 INDEXER_DEFINITIONS=(
     "YTS|https://yts.mx|yts|YTS"                                          # definitionName: "yts"
     "The Pirate Bay|https://thepiratebay.org|thepiratebay|The Pirate Bay" # definitionName: "thepiratebay"
-    "TorrentGalaxy|https://torrentgalaxy.to|torrentgalaxy|TorrentGalaxy"  # definitionName: "torrentgalaxy"
     "Nyaa|https://nyaa.si|nyaasi|Nyaa.si"                                 # definitionName: "nyaasi"
-    "LimeTorrents|https://www.limetorrents.lol|limetorrents|LimeTorrents" # definitionName: "limetorrents"
+    "LimeTorrents|https://www.limetorrents.fun|limetorrents|LimeTorrents" # definitionName: "limetorrents"
 )
 
 echo -e "${BLUE}"
@@ -95,6 +101,57 @@ log_warn() {
 
 log_error() {
     echo -e "${RED}[✗]${NC} $1"
+}
+
+# Resolve the directory holding *arr / Overseerr config files. Precedence
+# (highest wins):
+#   1. CONFIG_DIR set in the process environment
+#   2. DOCKER_CONFIG set in the process environment
+#   3. DOCKER_CONFIG=... read from the .env file next to this script — the
+#      file setup.sh writes. docker compose reads that .env automatically for
+#      ${DOCKER_CONFIG} volume substitution, but running ./configure.sh per
+#      the readme exports nothing, so without this step the script silently
+#      fell back to ./configs (issue #29, round 2).
+#   4. ./configs
+#
+# .env is parsed with grep/cut, not sourced: sourcing would execute
+# hand-edited file content as shell code and import unrelated variables
+# (RADARR_PORT etc.) that shadow this script's own overrides. Stdout is the
+# resolved path — log lines go to stderr so $(resolve_config_dir) stays clean.
+resolve_config_dir() {
+    if [ -n "${CONFIG_DIR:-}" ]; then
+        echo "$CONFIG_DIR"
+        return 0
+    fi
+
+    if [ -n "${DOCKER_CONFIG:-}" ]; then
+        echo "$DOCKER_CONFIG"
+        return 0
+    fi
+
+    local env_file="${SCRIPT_DIR:-.}/.env"
+    if [ -f "$env_file" ]; then
+        local raw
+        # Last matching line wins; tolerate CRLF line endings and quotes
+        # (users hand-edit .env on Windows).
+        raw=$(grep '^DOCKER_CONFIG=' "$env_file" 2>/dev/null | tail -n 1 \
+            | cut -d'=' -f2- | tr -d '\r"' | tr -d "'")
+
+        if [ -n "$raw" ]; then
+            # Relative values (e.g. "./docker") resolve against this script's
+            # directory, matching how docker compose resolves the same .env
+            # value against the compose project directory.
+            case "$raw" in
+                /*) ;;
+                *) raw="${SCRIPT_DIR:-.}/${raw#./}" ;;
+            esac
+            log_info "Loaded DOCKER_CONFIG from .env: ${raw}" >&2
+            echo "$raw"
+            return 0
+        fi
+    fi
+
+    echo "./configs"
 }
 
 # Wait for a service to be ready
@@ -434,7 +491,11 @@ add_indexer() {
     local definition_name="$4"
     local impl_name="${5:-${name}}"
 
-    if curl -s -X POST "${PROWLARR_URL}/api/v1/indexer" \
+    # Duplicates are pre-filtered by add_public_indexers, so a failure here is
+    # almost always a real error (bad API key, validation, service not ready)
+    # and must surface the HTTP status instead of being shrugged off.
+    local status
+    status=$(curl -s -o /dev/null -w '%{http_code}' -X POST "${PROWLARR_URL}/api/v1/indexer" \
         -H "X-Api-Key: ${api_key}" \
         -H "Content-Type: application/json" \
         -d "{
@@ -443,7 +504,8 @@ add_indexer() {
             \"name\": \"${name}\",
             \"fields\": [
                 {\"name\": \"baseUrl\", \"value\": \"${base_url}\"},
-                {\"name\": \"baseSettings.limitsUnit\", \"value\": 0}
+                {\"name\": \"baseSettings.limitsUnit\", \"value\": 0},
+                {\"name\": \"definitionFile\", \"value\": \"${definition_name}\"}
             ],
             \"implementationName\": \"${impl_name}\",
             \"implementation\": \"Cardigann\",
@@ -452,11 +514,18 @@ add_indexer() {
             \"tags\": [],
             \"priority\": 25,
             \"appProfileId\": 1
-        }" >/dev/null 2>&1; then
-        log_success "Added ${name}"
-    else
-        log_warn "${name} may already exist"
-    fi
+        }") || status="000"
+
+    case "${status}" in
+        2*)
+            log_success "Added ${name}"
+            return 0
+            ;;
+        *)
+            log_warn "Failed to add ${name} (HTTP ${status})"
+            return 1
+            ;;
+    esac
 }
 
 # Add popular public indexers to Prowlarr
@@ -474,14 +543,28 @@ add_public_indexers() {
         -H "X-Api-Key: ${api_key}")
 
     local entry name base_url def_name impl_name
+    local added=0 skipped=0 failed=0
     for entry in "${INDEXER_DEFINITIONS[@]}"; do
         IFS='|' read -r name base_url def_name impl_name <<< "${entry}"
         if echo "${existing_indexers}" | grep -q "\"name\" *: *\"${name}\""; then
             log_info "${name} already configured in Prowlarr (skipping)"
+            skipped=$((skipped + 1))
             continue
         fi
-        add_indexer "${api_key}" "${name}" "${base_url}" "${def_name}" "${impl_name}"
+        if add_indexer "${api_key}" "${name}" "${base_url}" "${def_name}" "${impl_name}"; then
+            added=$((added + 1))
+        else
+            failed=$((failed + 1))
+        fi
     done
+
+    # Honest summary — Prowlarr validates each indexer against the live site
+    # on add, so geo-blocked/unreachable sites fail here (issue #29: "indexers
+    # just don't seem to be setup" with no explanation).
+    log_info "Indexers: ${added} added, ${skipped} already present, ${failed} failed"
+    if [ "${failed}" -gt 0 ]; then
+        log_warn "Failed indexers are usually geo-blocked or down. If your ISP blocks torrent sites, route Prowlarr through a VPN or add indexers manually in the Prowlarr UI."
+    fi
 }
 
 # Trigger Prowlarr to sync indexers to apps
@@ -502,27 +585,35 @@ sync_prowlarr_indexers() {
 # Overseerr Configuration Functions
 # =============================================================================
 
-# Check if Overseerr is already initialized
-# Get Overseerr API key from settings.json
+# Get Overseerr API key from settings.json.
+# Stdout carries ONLY the key (callers capture via $()); all log messages go
+# to stderr so they reach the user instead of being swallowed into the capture.
 get_overseerr_api_key() {
-    log_info "Retrieving Overseerr API key..."
+    log_info "Retrieving Overseerr API key..." >&2
 
-    local settings_path="${DOCKER_CONFIG}/overseerr/settings.json"
+    # Shared resolution with the *arr keys in main() — see resolve_config_dir
+    # for the full precedence chain including .env autoload (issue #29).
+    local settings_path
+    settings_path="$(resolve_config_dir)/overseerr/settings.json"
 
     if [ ! -f "$settings_path" ]; then
-        log_error "Overseerr settings.json not found. User must sign in with Plex first."
+        log_error "Overseerr settings.json not found at ${settings_path}." >&2
+        log_info "If you have not signed in yet: sign in to Overseerr with Plex first." >&2
+        log_info "If you HAVE signed in: check DOCKER_CONFIG in your .env file (auto-loaded) or set CONFIG_DIR/DOCKER_CONFIG to override, then re-run, e.g. DOCKER_CONFIG=/path/to/config ./configure.sh" >&2
         return 1
     fi
 
+    # Overseerr pretty-prints settings.json ("apiKey": "..." with whitespace);
+    # the pattern must tolerate it (issue #29).
     local api_key
-    api_key=$(grep -o '"apiKey":"[^"]*"' "$settings_path" | cut -d'"' -f4)
+    api_key=$(grep -oP '"apiKey"\s*:\s*"\K[^"]*' "$settings_path" | head -1)
 
     if [ -z "$api_key" ]; then
-        log_error "Overseerr API key not found in settings"
+        log_error "Overseerr API key not found in settings" >&2
         return 1
     fi
 
-    log_success "Overseerr API key retrieved"
+    log_success "Overseerr API key retrieved" >&2
     echo "$api_key"
     return 0
 }
@@ -545,6 +636,86 @@ initialize_overseerr() {
     fi
 }
 
+# Extract the first quality profile's "<id>|<name>" from a Radarr/Sonarr
+# /api/v3/qualityprofile response, reading from stdin.
+# Depth-aware on purpose: profile objects nest "items"/"quality" objects that
+# also carry "id"/"name" keys (a naive first-match grep returns quality id 0,
+# not the profile id), and Radarr/Sonarr pretty-print responses. Works on
+# compact and pretty JSON without a jq dependency.
+extract_first_profile() {
+    awk '
+    BEGIN { depth = 0; in_str = 0; esc = 0 }
+    {
+        line = $0
+        for (i = 1; i <= length(line); i++) {
+            c = substr(line, i, 1)
+            if (esc) { esc = 0; if (in_str) buf = buf c; continue }
+            if (c == "\\") { esc = 1; continue }
+            if (c == "\"") {
+                if (in_str) {
+                    in_str = 0
+                    if (want == "name" && depth == 1) { pname = buf; want = "" }
+                    else { last_key = buf }
+                } else { in_str = 1; buf = "" }
+                continue
+            }
+            if (in_str) { buf = buf c; continue }
+            if (c == "{") { depth++; continue }
+            if (c == "}") {
+                # end of the first profile object → emit what we collected
+                if (depth == 1 && (pid != "" || pname != "")) { print pid "|" pname; exit }
+                depth--; continue
+            }
+            if (c == ":" && depth == 1) {
+                if (last_key == "id") want = "id"
+                else if (last_key == "name") want = "name"
+                continue
+            }
+            if (want == "id" && c ~ /[0-9]/) { pid = pid c; continue }
+            if (want == "id" && pid != "") { want = "" }
+        }
+    }'
+}
+
+# Check whether a service instance managed by this script already exists in
+# Overseerr's settings. Matches by hostname — Overseerr may hold several
+# Radarr/Sonarr instances (4K, anime) and only the one this script manages
+# may be considered; matching "the first id" would target the wrong instance.
+# Parameters:
+#   $1 overseerr_api_key — Overseerr X-Api-Key
+#   $2 endpoint          — settings endpoint: "radarr" or "sonarr"
+#   $3 service_host      — hostname of the instance this script manages
+# Output: "configured" or "absent" on stdout
+# Returns: 1 when the existence check itself fails (no response or non-200) —
+#          callers must NOT fall through to POST on failure, that recreates
+#          the issue #29 duplicate-server bug under a transient outage
+check_overseerr_service() {
+    local overseerr_api_key="$1"
+    local endpoint="$2"
+    local service_host="$3"
+
+    local response
+    if ! response=$(curl -s -w '\n%{http_code}' \
+        -H "X-Api-Key: ${overseerr_api_key}" \
+        "${OVERSEERR_URL}/api/v1/settings/${endpoint}"); then
+        return 1
+    fi
+
+    local status="${response##*$'\n'}"
+    local body="${response%$'\n'*}"
+
+    if [ "$status" != "200" ]; then
+        return 1
+    fi
+
+    if echo "$body" | grep -q "\"hostname\" *: *\"${service_host}\""; then
+        echo "configured"
+    else
+        echo "absent"
+    fi
+    return 0
+}
+
 # Add Radarr to Overseerr
 add_radarr_to_overseerr() {
     local radarr_api_key=$1
@@ -552,21 +723,38 @@ add_radarr_to_overseerr() {
 
     log_info "Adding Radarr to Overseerr..."
 
-    # Get Radarr quality profiles
-    local profiles
-    profiles=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
-        "${RADARR_URL}/api/v3/qualityprofile")
-    local profile_id
-    profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+    # Existence check by hostname — never update an existing entry: it may
+    # carry user customizations made in the Overseerr UI (quality profile,
+    # root folder, tags) that a defaults-built request would silently destroy
+    # (Overseerr's PUT replaces the entry, it does not merge).
+    local existing_state
+    if ! existing_state=$(check_overseerr_service "${overseerr_api_key}" "radarr" "${RADARR_HOST}"); then
+        log_error "Could not verify existing Radarr configuration in Overseerr (service unreachable or returned an error)"
+        return 1
+    fi
+    if [ "$existing_state" = "configured" ]; then
+        log_info "Radarr already configured in Overseerr (already configured, skipping)"
+        return 0
+    fi
 
-    # Get Radarr root folders
+    # Get the first Radarr quality profile (id AND name — Overseerr's API
+    # requires activeProfileName too). extract_first_profile handles the
+    # pretty-printed, nested JSON Radarr returns (issue #29: the old
+    # compact-only grep matched a nested quality id and always failed).
+    local profile profile_id profile_name
+    profile=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
+        "${RADARR_URL}/api/v3/qualityprofile" | extract_first_profile)
+    profile_id="${profile%%|*}"
+    profile_name="${profile#*|}"
+
+    # Get Radarr root folders (whitespace-tolerant: responses are pretty-printed)
     local root_folders
     root_folders=$(curl -s -H "X-Api-Key: ${radarr_api_key}" \
         "${RADARR_URL}/api/v3/rootfolder")
     local root_path
-    root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
+    root_path=$(echo "$root_folders" | grep -oP '"path"\s*:\s*"\K[^"]*' | head -1)
 
-    if [ -z "$profile_id" ] || [ -z "$root_path" ]; then
+    if [ -z "$profile_id" ] || [ -z "$profile_name" ] || [ -z "$root_path" ]; then
         log_error "Failed to get Radarr configuration"
         return 1
     fi
@@ -579,6 +767,7 @@ add_radarr_to_overseerr() {
         \"useSsl\": false,
         \"baseUrl\": \"\",
         \"activeProfileId\": ${profile_id},
+        \"activeProfileName\": \"${profile_name}\",
         \"activeDirectory\": \"${root_path}\",
         \"is4k\": false,
         \"minimumAvailability\": \"released\",
@@ -591,7 +780,7 @@ add_radarr_to_overseerr() {
     response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/radarr" \
         -H "Content-Type: application/json" \
         -H "X-Api-Key: ${overseerr_api_key}" \
-        -d "$radarr_config")
+        -d "$radarr_config" || true)
 
     if echo "$response" | grep -q '"id"'; then
         log_success "Radarr added to Overseerr"
@@ -609,21 +798,34 @@ add_sonarr_to_overseerr() {
 
     log_info "Adding Sonarr to Overseerr..."
 
-    # Get Sonarr quality profiles
-    local profiles
-    profiles=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
-        "${SONARR_URL}/api/v3/qualityprofile")
-    local profile_id
-    profile_id=$(echo "$profiles" | grep -o '"id":[0-9]*' | head -1 | cut -d':' -f2)
+    # Existence check by hostname — never update an existing entry (see
+    # check_overseerr_service and add_radarr_to_overseerr for rationale).
+    local existing_state
+    if ! existing_state=$(check_overseerr_service "${overseerr_api_key}" "sonarr" "${SONARR_HOST}"); then
+        log_error "Could not verify existing Sonarr configuration in Overseerr (service unreachable or returned an error)"
+        return 1
+    fi
+    if [ "$existing_state" = "configured" ]; then
+        log_info "Sonarr already configured in Overseerr (already configured, skipping)"
+        return 0
+    fi
 
-    # Get Sonarr root folders
+    # Get the first Sonarr quality profile (id AND name — Overseerr's API
+    # requires activeProfileName too; see add_radarr_to_overseerr).
+    local profile profile_id profile_name
+    profile=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
+        "${SONARR_URL}/api/v3/qualityprofile" | extract_first_profile)
+    profile_id="${profile%%|*}"
+    profile_name="${profile#*|}"
+
+    # Get Sonarr root folders (whitespace-tolerant: responses are pretty-printed)
     local root_folders
     root_folders=$(curl -s -H "X-Api-Key: ${sonarr_api_key}" \
         "${SONARR_URL}/api/v3/rootfolder")
     local root_path
-    root_path=$(echo "$root_folders" | grep -o '"path":"[^"]*"' | head -1 | cut -d'"' -f4)
+    root_path=$(echo "$root_folders" | grep -oP '"path"\s*:\s*"\K[^"]*' | head -1)
 
-    if [ -z "$profile_id" ] || [ -z "$root_path" ]; then
+    if [ -z "$profile_id" ] || [ -z "$profile_name" ] || [ -z "$root_path" ]; then
         log_error "Failed to get Sonarr configuration"
         return 1
     fi
@@ -636,6 +838,7 @@ add_sonarr_to_overseerr() {
         \"useSsl\": false,
         \"baseUrl\": \"\",
         \"activeProfileId\": ${profile_id},
+        \"activeProfileName\": \"${profile_name}\",
         \"activeDirectory\": \"${root_path}\",
         \"is4k\": false,
         \"enableSeasonFolders\": true,
@@ -648,7 +851,7 @@ add_sonarr_to_overseerr() {
     response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/sonarr" \
         -H "Content-Type: application/json" \
         -H "X-Api-Key: ${overseerr_api_key}" \
-        -d "$sonarr_config")
+        -d "$sonarr_config" || true)
 
     if echo "$response" | grep -q '"id"'; then
         log_success "Sonarr added to Overseerr"
@@ -659,31 +862,25 @@ add_sonarr_to_overseerr() {
     fi
 }
 
-# Enable Plex watchlist sync in Overseerr
+# Enable Plex watchlist sync in Overseerr.
+# Watchlist sync is a PER-USER setting (POST /api/v1/user/{id}/settings/main),
+# not a field on /api/v1/settings/main — the previous implementation toggled
+# "autoApproveMovie"/"autoApproveSeries" fields that do not exist on the main
+# settings endpoint, so it failed on every run (issue #29). The owner (user 1,
+# created by the Plex sign-in) auto-approves implicitly as an admin.
 enable_overseerr_watchlist_sync() {
     local overseerr_api_key=$1
 
-    log_info "Enabling Overseerr watchlist sync..."
-
-    # Get current settings
-    local current_settings
-    current_settings=$(curl -s -H "X-Api-Key: ${overseerr_api_key}" \
-        "${OVERSEERR_URL}/api/v1/settings/main")
-
-    # Update with watchlist sync enabled
-    local updated_settings
-    updated_settings=$(echo "$current_settings" | \
-        sed 's/"autoApproveMovie":[^,]*/"autoApproveMovie":true/' | \
-        sed 's/"autoApproveSeries":[^,]*/"autoApproveSeries":true/')
+    log_info "Enabling Overseerr watchlist sync for the owner account..."
 
     local response
-    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/settings/main" \
+    response=$(curl -s -X POST "${OVERSEERR_URL}/api/v1/user/1/settings/main" \
         -H "Content-Type: application/json" \
         -H "X-Api-Key: ${overseerr_api_key}" \
-        -d "$updated_settings")
+        -d '{"watchlistSyncMovies": true, "watchlistSyncTv": true}')
 
-    if echo "$response" | grep -q '"autoApproveMovie":true'; then
-        log_success "Watchlist sync enabled with auto-approval"
+    if echo "$response" | grep -qP '"watchlistSyncMovies"\s*:\s*true'; then
+        log_success "Watchlist sync enabled (movies + TV) for the owner account"
         return 0
     else
         log_error "Failed to enable watchlist sync"
@@ -712,8 +909,9 @@ main() {
     log_success "Required tools found"
     echo ""
 
-    # Get config directory from environment or use default
-    CONFIG_DIR="${CONFIG_DIR:-${DOCKER_CONFIG:-./configs}}"
+    # Get config directory — see resolve_config_dir for the precedence chain,
+    # including .env autoload (issue #29, round 2)
+    CONFIG_DIR="$(resolve_config_dir)"
 
     # Check if we should use local config files or wait for services
     if [ -f "${CONFIG_DIR}/radarr/config.xml" ]; then
@@ -757,8 +955,13 @@ main() {
         fi
     fi
 
-    add_qbittorrent_to_radarr "$RADARR_API_KEY"
-    add_qbittorrent_to_sonarr "$SONARR_API_KEY"
+    # Each integration step is individually guarded: under set -e an unguarded
+    # failing step aborted the whole script, silently skipping everything after
+    # it — including the Prowlarr indexers (issue #29).
+    add_qbittorrent_to_radarr "$RADARR_API_KEY" || \
+        log_warn "qBittorrent → Radarr wiring failed; continuing"
+    add_qbittorrent_to_sonarr "$SONARR_API_KEY" || \
+        log_warn "qBittorrent → Sonarr wiring failed; continuing"
 
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -778,8 +981,10 @@ main() {
             bash -c "mkdir -p '${TV_PATH}' && chown abc:abc '${TV_PATH}'" 2>/dev/null || true
     fi
 
-    add_radarr_root_folder "$RADARR_API_KEY"
-    add_sonarr_root_folder "$SONARR_API_KEY"
+    add_radarr_root_folder "$RADARR_API_KEY" || \
+        log_warn "Radarr root folder setup failed; continuing"
+    add_sonarr_root_folder "$SONARR_API_KEY" || \
+        log_warn "Sonarr root folder setup failed; continuing"
 
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -787,8 +992,10 @@ main() {
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
 
-    add_radarr_to_prowlarr "$PROWLARR_API_KEY" "$RADARR_API_KEY"
-    add_sonarr_to_prowlarr "$PROWLARR_API_KEY" "$SONARR_API_KEY"
+    add_radarr_to_prowlarr "$PROWLARR_API_KEY" "$RADARR_API_KEY" || \
+        log_warn "Radarr → Prowlarr wiring failed; continuing"
+    add_sonarr_to_prowlarr "$PROWLARR_API_KEY" "$SONARR_API_KEY" || \
+        log_warn "Sonarr → Prowlarr wiring failed; continuing"
 
     echo ""
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -833,14 +1040,20 @@ main() {
     if initialize_overseerr; then
         log_info "Overseerr is initialized, configuring services..."
 
-        overseerr_api_key=$(get_overseerr_api_key)
+        # '|| overseerr_api_key=""' keeps set -e from killing the whole script
+        # here — this exact line aborted silently when the key lookup failed
+        # (issue #29); the empty-string guard below is the real handler.
+        overseerr_api_key=$(get_overseerr_api_key) || overseerr_api_key=""
 
         if [ -z "$overseerr_api_key" ]; then
             log_error "Could not retrieve Overseerr API key - skipping Overseerr configuration"
         else
-            add_radarr_to_overseerr "$RADARR_API_KEY" "$overseerr_api_key"
-            add_sonarr_to_overseerr "$SONARR_API_KEY" "$overseerr_api_key"
-            enable_overseerr_watchlist_sync "$overseerr_api_key"
+            add_radarr_to_overseerr "$RADARR_API_KEY" "$overseerr_api_key" || \
+                log_warn "Radarr → Overseerr wiring failed; continuing"
+            add_sonarr_to_overseerr "$SONARR_API_KEY" "$overseerr_api_key" || \
+                log_warn "Sonarr → Overseerr wiring failed; continuing"
+            enable_overseerr_watchlist_sync "$overseerr_api_key" || \
+                log_warn "Overseerr watchlist sync setup failed; continuing"
 
             log_success "Overseerr configuration complete!"
         fi

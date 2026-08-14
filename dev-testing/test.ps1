@@ -1638,12 +1638,6 @@ if ($prowlarrApiKey) {
             baseUrl = "https://thepiratebay.org"
         },
         @{
-            name = "TorrentGalaxy"
-            implementationName = "TorrentGalaxy"
-            definitionName = "torrentgalaxy"
-            baseUrl = "https://torrentgalaxy.to"
-        },
-        @{
             name = "Nyaa"
             implementationName = "Nyaa.si"
             definitionName = "nyaasi"
@@ -1653,7 +1647,7 @@ if ($prowlarrApiKey) {
             name = "LimeTorrents"
             implementationName = "LimeTorrents"
             definitionName = "limetorrents"
-            baseUrl = "https://www.limetorrents.lol"
+            baseUrl = "https://www.limetorrents.fun"
         }
     )
     

@@ -228,11 +228,12 @@ fi
 section "Phase 3: Indexer Data Completeness (Regression Guards)"
 
 printf "\n"
-info "All 5 indexer names, definitionNames, and base URL fragments must survive the refactoring"
+info "All 4 indexer names, definitionNames, and base URL fragments must survive the refactoring"
 printf "\n"
 
-# 3.1–3.5 — Indexer display names (appear in single-quoted JSON as literal "YTS" etc.)
-declare -a _INDEXER_NAMES=("YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa" "LimeTorrents")
+# 3.1–3.4 — Indexer display names (appear in single-quoted JSON as literal "YTS" etc.)
+# NOTE: TorrentGalaxy removed — site shut down, Prowlarr deleted the definition.
+declare -a _INDEXER_NAMES=("YTS" "The Pirate Bay" "Nyaa" "LimeTorrents")
 for _name in "${_INDEXER_NAMES[@]}"; do
     if grep -qF "\"${_name}\"" "${CONFIGURE_SH}"; then
         pass "configure.sh — indexer name \"${_name}\" is present"
@@ -244,7 +245,7 @@ done
 printf "\n"
 
 # 3.6–3.10 — Prowlarr definitionNames (used to look up the indexer schema)
-declare -a _DEFINITION_NAMES=("yts" "thepiratebay" "torrentgalaxy" "nyaasi" "limetorrents")
+declare -a _DEFINITION_NAMES=("yts" "thepiratebay" "nyaasi" "limetorrents")
 for _defn in "${_DEFINITION_NAMES[@]}"; do
     if grep -qF "\"${_defn}\"" "${CONFIGURE_SH}"; then
         pass "configure.sh — definitionName \"${_defn}\" is present"
@@ -256,7 +257,7 @@ done
 printf "\n"
 
 # 3.11–3.15 — Base URL fragments for each indexer
-declare -a _BASE_URL_FRAGS=("yts.mx" "thepiratebay.org" "torrentgalaxy.to" "nyaa.si" "limetorrents.lol")
+declare -a _BASE_URL_FRAGS=("yts.mx" "thepiratebay.org" "nyaa.si" "limetorrents.fun")
 for _frag in "${_BASE_URL_FRAGS[@]}"; do
     if grep -q "${_frag}" "${CONFIGURE_SH}"; then
         pass "configure.sh — base URL fragment \"${_frag}\" is present"
@@ -365,13 +366,12 @@ if [[ "${_INDEXER_FUNC_EXISTS}" != "true" ]]; then
     skip "add_indexer payload capture — skipped (function missing)"
 else
     # Indexer test matrix: "name|base_url|definitionName"
-    # These mirror the 5 original hardcoded curl blocks in add_public_indexers().
+    # These mirror the hardcoded curl blocks in add_public_indexers().
     declare -a _INDEXER_MATRIX=(
         "YTS|https://yts.mx|yts"
         "The Pirate Bay|https://thepiratebay.org|thepiratebay"
-        "TorrentGalaxy|https://torrentgalaxy.to|torrentgalaxy"
         "Nyaa|https://nyaa.si|nyaasi"
-        "LimeTorrents|https://www.limetorrents.lol|limetorrents"
+        "LimeTorrents|https://www.limetorrents.fun|limetorrents"
     )
 
     for _entry in "${_INDEXER_MATRIX[@]}"; do

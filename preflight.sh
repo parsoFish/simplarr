@@ -271,7 +271,7 @@ for port in "${!PORTS[@]}"; do
     if check_port "$port" "$service"; then
         pass "Port ${port} is available (${service})"
     else
-        fail "Port ${port} is in use (${service})" "Stop the service using this port or change the port mapping in docker-compose.yml"
+        fail "Port ${port} is in use (${service})" "Stop the service using this port or change the port mapping in your docker-compose-*.yml file"
     fi
 done
 

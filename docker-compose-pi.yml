@@ -121,6 +121,8 @@ services:
     image: nginx:1.28.2-alpine3.23
     container_name: nginx
     ports:
+      # Change the host side if 80/443 are already taken (e.g. a NAS admin
+      # UI): "8282:80" / "8443:443" — see readme.md "Port conflicts" note.
       - "80:80"
       - "443:443"
     volumes:

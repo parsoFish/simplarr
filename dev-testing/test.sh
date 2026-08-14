@@ -1640,10 +1640,11 @@ else
     _indexer_added_count=0
     _indexer_skip_count=0
 
-    declare -a _INDEXER_NAMES=("YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa" "LimeTorrents")
-    declare -a _INDEXER_IMPL_NAMES=("YTS" "The Pirate Bay" "TorrentGalaxy" "Nyaa.si" "LimeTorrents")
-    declare -a _INDEXER_DEF_NAMES=("yts" "thepiratebay" "torrentgalaxy" "nyaasi" "limetorrents")
-    declare -a _INDEXER_BASE_URLS=("https://yts.mx" "https://thepiratebay.org" "https://torrentgalaxy.to" "https://nyaa.si" "https://www.limetorrents.lol")
+    # NOTE: TorrentGalaxy removed — site shut down, Prowlarr deleted the definition.
+    declare -a _INDEXER_NAMES=("YTS" "The Pirate Bay" "Nyaa" "LimeTorrents")
+    declare -a _INDEXER_IMPL_NAMES=("YTS" "The Pirate Bay" "Nyaa.si" "LimeTorrents")
+    declare -a _INDEXER_DEF_NAMES=("yts" "thepiratebay" "nyaasi" "limetorrents")
+    declare -a _INDEXER_BASE_URLS=("https://yts.mx" "https://thepiratebay.org" "https://nyaa.si" "https://www.limetorrents.fun")
 
     for _idx in "${!_INDEXER_NAMES[@]}"; do
         _iname="${_INDEXER_NAMES[${_idx}]}"

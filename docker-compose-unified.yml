@@ -160,7 +160,14 @@ services:
   nginx:
     image: nginx:1.28.2-alpine3.23
     container_name: nginx
+    # host.docker.internal exists only on Docker Desktop; native Linux Docker
+    # needs this explicit mapping or nginx crash-loops with
+    # 'host not found in upstream "host.docker.internal"' (issue #28).
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
+      # Change the host side if 80/443 are already taken (e.g. a NAS admin
+      # UI): "8282:80" / "8443:443" — see readme.md "Port conflicts" note.
       - "80:80"
       - "443:443"
     volumes:
@@ -207,22 +214,23 @@ services:
       start_period: 10s
     restart: unless-stopped
 
-networks:
-  default:
-    name: media-network
-
 # =============================================================================
 # VPN Configuration (Optional - Uncomment to Enable)
 # =============================================================================
 # To route qBittorrent traffic through a VPN using Gluetun:
 #
-# 1. Uncomment the 'gluetun' service below
-# 2. Add VPN environment variables to unified.env (see .env.vpn.example)
-# 3. Comment out the 'ports' section in qbittorrent above
-# 4. Uncomment the 'qbittorrent-vpn-overrides' section below
+# 1. Comment out the entire 'qbittorrent' service above - the VPN override below replaces it
+# 2. Uncomment the 'gluetun' service below, INCLUDING its 'networks:' alias block (the 'qbittorrent' alias lets nginx resolve the qBittorrent WebUI through gluetun - issue #28)
+# 3. Uncomment the 'qbittorrent' VPN override service below
+# 4. Add VPN environment variables to unified.env (see .env.vpn.example)
 #
 # Verify VPN is working:
-#   docker exec qbittorrent curl -s https://ipinfo.io/ip
+# docker exec qbittorrent curl -s https://ipinfo.io/ip
+#
+# NOTE: this section sits inside 'services:' on purpose - template lines are
+# prefixed with '#' + two spaces so they land at the correct indent when
+# uncommented. Prose comments in this section keep a single space after '#';
+# do not uncomment those.
 # =============================================================================
 
 #  gluetun:
@@ -259,6 +267,10 @@ networks:
 #      retries: 5
 #      start_period: 60s
 #    restart: unless-stopped
+#    networks:
+#      default:
+#        aliases:
+#          - qbittorrent
 
 # -----------------------------------------------------------------------------
 # qBittorrent VPN Overrides
@@ -287,3 +299,7 @@ networks:
 #      gluetun:
 #        condition: service_healthy
 #    restart: unless-stopped
+
+networks:
+  default:
+    name: media-network
