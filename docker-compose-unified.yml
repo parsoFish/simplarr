@@ -166,6 +166,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
+      # Change the host side if 80/443 are already taken (e.g. a NAS admin
+      # UI): "8282:80" / "8443:443" — see readme.md "Port conflicts" note.
       - "80:80"
       - "443:443"
     volumes:
