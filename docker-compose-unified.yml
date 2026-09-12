@@ -3,7 +3,7 @@ services:
   # Media Server
   # ===================
   plex:
-    image: linuxserver/plex:1.43.0.10492-121068a07-ls295
+    image: linuxserver/plex:1.43.4.10903-e5521bd8c-ls324
     container_name: plex
     network_mode: host
     environment:
@@ -28,7 +28,7 @@ services:
   # Download Client
   # ===================
   qbittorrent:
-    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+    image: linuxserver/qbittorrent:5.2.3_v2.0.14-ls475
     container_name: qbittorrent
     ports:
       - 8080:8080
@@ -54,7 +54,7 @@ services:
   # Media Management
   # ===================
   radarr:
-    image: linuxserver/radarr:6.0.4.10291-ls294
+    image: linuxserver/radarr:6.3.0.10514-ls315
     container_name: radarr
     ports:
       - 7878:7878
@@ -75,7 +75,7 @@ services:
     restart: unless-stopped
 
   sonarr:
-    image: linuxserver/sonarr:4.0.16.2944-ls303
+    image: linuxserver/sonarr:4.0.19.2979-ls324
     container_name: sonarr
     ports:
       - 8989:8989
@@ -96,7 +96,7 @@ services:
     restart: unless-stopped
 
   prowlarr:
-    image: linuxserver/prowlarr:2.3.0.5236-ls138
+    image: linuxserver/prowlarr:2.5.2.5491-ls159
     container_name: prowlarr
     ports:
       - 9696:9696
@@ -136,7 +136,7 @@ services:
     restart: unless-stopped
 
   tautulli:
-    image: linuxserver/tautulli:v2.16.1-ls217
+    image: linuxserver/tautulli:v2.18.1-ls244
     container_name: tautulli
     ports:
       - 8181:8181
@@ -278,7 +278,7 @@ services:
 # When enabling VPN, replace the qbittorrent service above with this version:
 # -----------------------------------------------------------------------------
 #  qbittorrent:
-#    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+#    image: linuxserver/qbittorrent:5.2.3_v2.0.14-ls475
 #    container_name: qbittorrent
 #    network_mode: "service:gluetun"
 #    environment:
