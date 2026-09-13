@@ -3,7 +3,7 @@
 All Docker images in this project are pinned to specific stable release tags.
 This document records the pinned version, release date, and upstream changelog URL for each service.
 
-> **Last updated:** 2026-03-05
+> **Last updated:** 2026-09-13
 
 ---
 
@@ -11,12 +11,12 @@ This document records the pinned version, release date, and upstream changelog U
 
 | Service | Image | Tag | Release Date | Upstream Changelog |
 |---------|-------|-----|-------------|-------------------|
-| Plex Media Server | `linuxserver/plex` | `1.43.0.10492-121068a07-ls295` | 2026-03-02 | [GitHub Releases](https://github.com/linuxserver/docker-plex/releases) / [Plex Release Notes](https://www.plex.tv/media-server-downloads/plex-media-server/release-notes/) |
-| Radarr | `linuxserver/radarr` | `6.0.4.10291-ls294` | 2026-03-01 | [GitHub Releases](https://github.com/linuxserver/docker-radarr/releases) / [Radarr Releases](https://github.com/Radarr/Radarr/releases) |
-| Sonarr | `linuxserver/sonarr` | `4.0.16.2944-ls303` | 2026-02-14 | [GitHub Releases](https://github.com/linuxserver/docker-sonarr/releases) / [Sonarr Releases](https://github.com/Sonarr/Sonarr/releases) |
-| Prowlarr | `linuxserver/prowlarr` | `2.3.0.5236-ls138` | 2026-03-04 | [GitHub Releases](https://github.com/linuxserver/docker-prowlarr/releases) / [Prowlarr Releases](https://github.com/Prowlarr/Prowlarr/releases) |
-| qBittorrent | `linuxserver/qbittorrent` | `5.1.4-r2-ls443` | 2026-03-01 | [GitHub Releases](https://github.com/linuxserver/docker-qbittorrent/releases) / [qBittorrent News](https://www.qbittorrent.org/news.php) |
-| Tautulli | `linuxserver/tautulli` | `v2.16.1-ls217` | 2026-02-16 | [GitHub Releases](https://github.com/linuxserver/docker-tautulli/releases) / [Tautulli Releases](https://github.com/Tautulli/Tautulli/releases) |
+| Plex Media Server | `linuxserver/plex` | `1.43.4.10903-e5521bd8c-ls324` | 2026-09-10 | [GitHub Releases](https://github.com/linuxserver/docker-plex/releases) / [Plex Release Notes](https://www.plex.tv/media-server-downloads/plex-media-server/release-notes/) |
+| Radarr | `linuxserver/radarr` | `6.3.0.10514-ls315` | 2026-09-06 | [GitHub Releases](https://github.com/linuxserver/docker-radarr/releases) / [Radarr Releases](https://github.com/Radarr/Radarr/releases) |
+| Sonarr | `linuxserver/sonarr` | `4.0.19.2979-ls324` | 2026-09-12 | [GitHub Releases](https://github.com/linuxserver/docker-sonarr/releases) / [Sonarr Releases](https://github.com/Sonarr/Sonarr/releases) |
+| Prowlarr | `linuxserver/prowlarr` | `2.5.2.5491-ls159` | 2026-09-09 | [GitHub Releases](https://github.com/linuxserver/docker-prowlarr/releases) / [Prowlarr Releases](https://github.com/Prowlarr/Prowlarr/releases) |
+| qBittorrent | `linuxserver/qbittorrent` | `5.2.3_v2.0.14-ls475` | 2026-09-06 | [GitHub Releases](https://github.com/linuxserver/docker-qbittorrent/releases) / [qBittorrent News](https://www.qbittorrent.org/news.php) |
+| Tautulli | `linuxserver/tautulli` | `v2.18.1-ls244` | 2026-09-11 | [GitHub Releases](https://github.com/linuxserver/docker-tautulli/releases) / [Tautulli Releases](https://github.com/Tautulli/Tautulli/releases) |
 | Overseerr | `sctx/overseerr` | `1.35.0` | 2026-02-15 | [GitHub Releases](https://github.com/sct/overseerr/releases) |
 | Nginx (reverse proxy) | `nginx` | `1.28.2-alpine3.23` | 2026-02-08 | [Docker Hub Tags](https://hub.docker.com/_/nginx/tags) / [nginx CHANGES-1.28](https://nginx.org/en/CHANGES-1.28) |
 | Gluetun VPN (optional) | `qmcgaw/gluetun` | `v3.41.1` | 2026-02-11 | [GitHub Releases](https://github.com/qdm12/gluetun/releases) |

@@ -1,6 +1,6 @@
 services:
   plex:
-    image: linuxserver/plex:1.43.0.10492-121068a07-ls295
+    image: linuxserver/plex:1.43.4.10903-e5521bd8c-ls324
     container_name: plex
     network_mode: host
     environment:
@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
 
   qbittorrent:
-    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+    image: linuxserver/qbittorrent:5.2.3_v2.0.14-ls475
     container_name: qbittorrent
     ports:
       - 8080:8080
@@ -107,7 +107,7 @@ services:
 # When enabling VPN, replace the qbittorrent service above with this version:
 # -----------------------------------------------------------------------------
 #  qbittorrent:
-#    image: linuxserver/qbittorrent:5.1.4-r2-ls443
+#    image: linuxserver/qbittorrent:5.2.3_v2.0.14-ls475
 #    container_name: qbittorrent
 #    network_mode: "service:gluetun"
 #    environment:
