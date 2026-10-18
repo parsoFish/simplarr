@@ -19,15 +19,14 @@ param(
     [string]$ProwlarrUrl = "http://localhost:9696",
     [string]$QBittorrentUrl = "http://localhost:8080",
     [string]$OverseerrUrl = "http://localhost:5055",
-    [string]$ConfigDir = ".\configs",
-    [string]$QBittorrentHost = $env:QBITTORRENT_HOST
+    [string]$ConfigDir = ".\configs"
 )
 
 # Internal Docker network names
 $RadarrHost = "radarr"
 $SonarrHost = "sonarr"
 $ProwlarrHost = "prowlarr"
-$QBittorrentHost = if ([string]::IsNullOrWhiteSpace($QBittorrentHost)) { "qbittorrent" } else { $QBittorrentHost }
+$QBittorrentHost = "qbittorrent"
 $PlexHost = "plex"
 $OverseerrHost = "overseerr"
 
@@ -648,13 +647,6 @@ $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
 $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
 $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
 
-if ($env:DOCKER_CONFIG -and $ConfigDir -eq ".\configs") {
-    $ConfigDir = $env:DOCKER_CONFIG
-    $radarrConfig = Join-Path $ConfigDir "radarr\config.xml"
-    $sonarrConfig = Join-Path $ConfigDir "sonarr\config.xml"
-    $prowlarrConfig = Join-Path $ConfigDir "prowlarr\config.xml"
-}
-
 if (Test-Path $radarrConfig) {
     Write-Info "Found local config files, extracting API keys..."
     $RadarrApiKey = Get-ArrApiKey -Name "Radarr" -ConfigPath $radarrConfig
@@ -712,17 +704,8 @@ Wait-ForService -Name "Overseerr" -Url $OverseerrUrl -Endpoint "/api/v1/status"
 
 if (-not (Initialize-Overseerr)) {
     Write-Warning "Overseerr is not initialized. Please sign in with your Plex account at $OverseerrUrl"
-    Write-Info "Complete the Overseerr sign-in, then press Enter to continue."
-    Write-Info "Or type 'skip' to skip Overseerr configuration for now."
-    $overseerrChoice = Read-Host "Continue"
-    if ($overseerrChoice -match '^(skip|s)$') {
-        Write-Warning "Skipping Overseerr configuration"
-    } elseif (-not (Initialize-Overseerr)) {
-        Write-Warning "Overseerr still not initialized. Skipping Overseerr configuration"
-    }
-}
-
-if (Initialize-Overseerr) {
+    Write-Warning "After signing in, run this script again to complete Overseerr configuration"
+} else {
     Write-Info "Overseerr is initialized, configuring services..."
     
     $overseerrApiKey = Get-OverseerrApiKey

@@ -676,7 +676,7 @@ main() {
     echo ""
     
     # Get config directory from environment or use default
-    CONFIG_DIR="${CONFIG_DIR:-${DOCKER_CONFIG:-./configs}}"
+    CONFIG_DIR="${CONFIG_DIR:-./configs}"
     
     # Check if we should use local config files or wait for services
     if [ -f "${CONFIG_DIR}/radarr/config.xml" ]; then
@@ -760,17 +760,8 @@ main() {
     
     if ! initialize_overseerr; then
         log_error "Overseerr is not initialized. Please sign in with your Plex account at $OVERSEERR_URL"
-        echo "Complete the Overseerr sign-in, then press Enter to continue."
-        echo "Or type 'skip' to skip Overseerr configuration for now."
-        read -p "Continue: " overseerr_choice
-        if [[ "$overseerr_choice" =~ ^(skip|s)$ ]]; then
-            log_warn "Skipping Overseerr configuration"
-        elif ! initialize_overseerr; then
-            log_warn "Overseerr still not initialized. Skipping Overseerr configuration"
-        fi
-    fi
-
-    if initialize_overseerr; then
+        log_error "After signing in, run this script again to complete Overseerr configuration"
+    else
         log_info "Overseerr is initialized, configuring services..."
         
         overseerr_api_key=$(get_overseerr_api_key)

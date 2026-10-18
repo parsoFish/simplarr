@@ -66,7 +66,7 @@ Once set up, your family and Plex friends just use the Plex app — they don't n
       automatically  └──────────────┘     └──────────────┘
 ```
 
-**Automated Wiring:** After you complete the Plex and Overseerr sign-in wizards, the configure script wires everything together — Overseerr monitors your Plex watchlist and sends requests to Radarr/Sonarr.
+**100% Automated:** The configure script wires everything together — Overseerr automatically monitors your Plex watchlist and sends requests to Radarr/Sonarr. Just sign in and start adding content.
 
 ## 📋 Requirements
 
@@ -114,21 +114,7 @@ Wait a few minutes for all services to start. Check status with:
 docker compose -f docker-compose-unified.yml ps
 ```
 
-### 4. Complete the setup wizards (manual prerequisites)
-
-Only a few quick manual steps remain. Replace `your-server-ip` with your server's IP address (e.g., `192.168.1.100`):
-
-**Plex** (`http://your-server-ip:32400/web`)
-1. Sign in with your Plex account
-2. Add library → Movies → `/movies`
-3. Add library → TV Shows → `/tv`
-
-**Overseerr** (`http://your-server-ip:5055`)
-1. **Sign in with Plex** (one-time OAuth authentication - this is required to initialize Overseerr)
-
-> 💡 **Why this step is required first:** Overseerr requires Plex OAuth sign-in before it can be configured via API. Complete this before running the configure script.
-
-### 5. Wire up the services
+### 4. Wire up the services
 
 ```bash
 # Linux/macOS
@@ -142,6 +128,32 @@ This automatically connects all services together:
 - qBittorrent ↔ Radarr/Sonarr ↔ Prowlarr
 - **Overseerr ↔ Radarr/Sonarr** (automatic requests)
 - **Overseerr Watchlist Sync** (auto-approval enabled)
+
+### 5. Complete the setup wizards
+
+Only a few quick manual steps remain. Replace `your-server-ip` with your server's IP address (e.g., `192.168.1.100`):
+
+**Plex** (`http://your-server-ip:32400/web`)
+1. Sign in with your Plex account
+2. Add library → Movies → `/movies`
+3. Add library → TV Shows → `/tv`
+
+**Overseerr** (`http://your-server-ip:5055`)
+1. **Sign in with Plex** (one-time OAuth authentication - this is required to initialize Overseerr)
+2. After signing in, **run the configure script again** to complete Overseerr setup:
+   ```powershell
+   .\configure.ps1
+   ```
+   Or on Linux/Mac:
+   ```bash
+   ./configure.sh
+   ```
+
+The configure script will automatically add:
+- Radarr and Sonarr connections ✓
+- Watchlist monitoring with auto-approval ✓
+
+> 💡 **Why the two-step process?** Overseerr requires Plex OAuth sign-in before it can be configured via API. Once you've signed in, the configure script handles the rest automatically.
 
 ### 6. Done!
 
@@ -163,35 +175,10 @@ If your NAS struggles with the *arr apps, you can run Plex and qBittorrent on th
 | Pi/Server | Radarr, Sonarr, Prowlarr, Overseerr, Tautulli, Nginx | `docker-compose-pi.yml` |
 
 **Setup:**
-1. Run `./setup.sh` (or `./setup.ps1`) and choose **Split Setup** on each device to generate a local .env with the correct paths.
+1. Run `./setup.sh` and choose "Split Setup"
 2. On NAS: `docker compose -f docker-compose-nas.yml up -d`
-3. On Pi/Server: Mount NAS storage via NFS, then `docker compose -f docker-compose-pi.yml up -d`
-4. On Pi/Server: Run `./configure.sh` (or `./configure.ps1`)
-
-> ✅ **Split setup note:** For the Pi/Server, the configure script should point qBittorrent at the NAS. Set `QBITTORRENT_HOST` to your NAS IP (or hostname) and use `QBITTORRENT_URL` if the WebUI is not on the Pi.
-
-### Split Setup From a Primary Machine (No Full Clone on Both Devices)
-
-If you don’t want to keep the full repo on both the NAS and the Pi/Server, you can copy only the required files from a primary machine:
-
-**NAS requires:**
-- `docker-compose-nas.yml`
-- `.env`
-- `setup.sh` or `setup.ps1` (optional, if you want to generate .env locally on NAS)
-- `templates/qBittorrent/qBittorrent.conf` (optional, for preconfigured qBittorrent settings)
-
-**Pi/Server requires:**
-- `docker-compose-pi.yml`
-- `.env`
-- `configure.sh` or `configure.ps1`
-- `nginx/split.conf`
-- `homepage/` (the dashboard container build context)
-
-**Suggested flow:**
-1. Clone the repo on your primary machine.
-2. Run setup on each device (or generate `.env` on the primary machine and copy it).
-3. Copy only the files listed above to each device.
-4. Start the NAS services first, then the Pi/Server services.
+3. On Pi: Mount NAS storage via NFS, then `docker compose -f docker-compose-pi.yml up -d`
+4. Run `./configure.sh` from the Pi
 
 ## 🌐 Accessing Services
 

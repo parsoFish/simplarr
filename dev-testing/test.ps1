@@ -1297,6 +1297,200 @@ if ($prowlarrApiKey) {
 }
 
 # =============================================================================
+# Overseerr Configuration Tests (like configure.sh)
+# =============================================================================
+
+Write-Header "Overseerr Configuration Tests"
+
+Write-Info "Testing Overseerr configuration (like configure.sh)..."
+Write-Info "Note: Overseerr requires Plex authentication to initialize - tests may be limited"
+
+# Note: We skip actual Plex connection since we don't have Plex running in tests
+# But we can test the Overseerr API and configuration structure
+
+Write-Test "Checking Overseerr API is responding..."
+try {
+    $overseerrStatus = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/status" -TimeoutSec 10
+    if ($overseerrStatus) {
+        if ($overseerrStatus.initialized -eq $false) {
+            Write-Warn "Overseerr API responding but not initialized (requires Plex setup - expected in tests)"
+        } else {
+            Write-Pass "Overseerr API is responding (initialized: $($overseerrStatus.initialized))"
+        }
+    } else {
+        Write-Fail "Overseerr API returned no data"
+    }
+} catch {
+    Write-Fail "Overseerr API not responding: $($_.Exception.Message)"
+}
+
+# Check if Overseerr is initialized (has been set up with Plex)
+$overseerrInitialized = $false
+try {
+    $status = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/status" -TimeoutSec 10 -ErrorAction Stop
+    $overseerrInitialized = $status.initialized -eq $true
+} catch {
+    $overseerrInitialized = $false
+}
+
+if (-not $overseerrInitialized) {
+    Write-Info "Overseerr is not initialized (requires Plex authentication)"
+    Write-Info "Skipping Overseerr configuration tests - these require Plex to be running"
+    Write-Skip "Overseerr configuration tests (requires Plex initialization)"
+    Write-Skip "Overseerr Radarr/Sonarr integration tests"
+    Write-Skip "Overseerr watchlist sync tests"
+} else {
+    # Only run these tests if Overseerr is initialized
+    if ($radarrApiKey) {
+        Write-Test "Adding Radarr to Overseerr (like configure.sh)..."
+    
+    # First get Radarr quality profiles and root folders
+    try {
+        $radarrProfiles = Invoke-RestMethod -Uri "http://localhost:7878/api/v3/qualityprofile" -Headers @{"X-Api-Key" = $radarrApiKey} -TimeoutSec 10
+        $radarrRootFolders = Invoke-RestMethod -Uri "http://localhost:7878/api/v3/rootfolder" -Headers @{"X-Api-Key" = $radarrApiKey} -TimeoutSec 10
+        
+        if ($radarrProfiles.Count -gt 0 -and $radarrRootFolders.Count -gt 0) {
+            $profileId = $radarrProfiles[0].id
+            $rootPath = $radarrRootFolders[0].path
+            
+            # Check if Radarr already exists in Overseerr
+            try {
+                $existingRadarr = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/radarr" -TimeoutSec 10 -ErrorAction SilentlyContinue
+                if ($existingRadarr -and $existingRadarr.Count -gt 0) {
+                    Write-Pass "Radarr already exists in Overseerr"
+                } else {
+                    throw "No existing Radarr"
+                }
+            } catch {
+                # Add Radarr to Overseerr
+                $radarrConfig = @{
+                    name = "Radarr"
+                    hostname = "radarr"
+                    port = 7878
+                    apiKey = $radarrApiKey
+                    useSsl = $false
+                    baseUrl = ""
+                    activeProfileId = $profileId
+                    activeDirectory = $rootPath
+                    is4k = $false
+                    minimumAvailability = "released"
+                    isDefault = $true
+                    externalUrl = ""
+                    syncEnabled = $true
+                }
+                
+                try {
+                    $response = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/radarr" -Method Post -Headers @{
+                        "Content-Type" = "application/json"
+                    } -Body ($radarrConfig | ConvertTo-Json) -TimeoutSec 10
+                    
+                    if ($response.id) {
+                        Write-Pass "Radarr added to Overseerr successfully"
+                    } else {
+                        Write-Fail "Unexpected response when adding Radarr to Overseerr"
+                    }
+                } catch {
+                    Write-Fail "Failed to add Radarr to Overseerr: $($_.Exception.Message)"
+                }
+            }
+        } else {
+            Write-Fail "Could not get Radarr profiles or root folders"
+        }
+    } catch {
+        Write-Fail "Failed to retrieve Radarr configuration: $($_.Exception.Message)"
+    }
+}
+
+# Test adding Sonarr to Overseerr (like configure.sh does)
+if ($sonarrApiKey) {
+    Write-Test "Adding Sonarr to Overseerr (like configure.sh)..."
+    
+    # First get Sonarr quality profiles and root folders
+    try {
+        $sonarrProfiles = Invoke-RestMethod -Uri "http://localhost:8989/api/v3/qualityprofile" -Headers @{"X-Api-Key" = $sonarrApiKey} -TimeoutSec 10
+        $sonarrRootFolders = Invoke-RestMethod -Uri "http://localhost:8989/api/v3/rootfolder" -Headers @{"X-Api-Key" = $sonarrApiKey} -TimeoutSec 10
+        
+        if ($sonarrProfiles.Count -gt 0 -and $sonarrRootFolders.Count -gt 0) {
+            $profileId = $sonarrProfiles[0].id
+            $rootPath = $sonarrRootFolders[0].path
+            
+            # Check if Sonarr already exists in Overseerr
+            try {
+                $existingSonarr = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/sonarr" -TimeoutSec 10 -ErrorAction SilentlyContinue
+                if ($existingSonarr -and $existingSonarr.Count -gt 0) {
+                    Write-Pass "Sonarr already exists in Overseerr"
+                } else {
+                    throw "No existing Sonarr"
+                }
+            } catch {
+                # Add Sonarr to Overseerr
+                $sonarrConfig = @{
+                    name = "Sonarr"
+                    hostname = "sonarr"
+                    port = 8989
+                    apiKey = $sonarrApiKey
+                    useSsl = $false
+                    baseUrl = ""
+                    activeProfileId = $profileId
+                    activeDirectory = $rootPath
+                    is4k = $false
+                    enableSeasonFolders = $true
+                    isDefault = $true
+                    externalUrl = ""
+                    syncEnabled = $true
+                }
+                
+                try {
+                    $response = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/sonarr" -Method Post -Headers @{
+                        "Content-Type" = "application/json"
+                    } -Body ($sonarrConfig | ConvertTo-Json) -TimeoutSec 10
+                    
+                    if ($response.id) {
+                        Write-Pass "Sonarr added to Overseerr successfully"
+                    } else {
+                        Write-Fail "Unexpected response when adding Sonarr to Overseerr"
+                    }
+                } catch {
+                    Write-Fail "Failed to add Sonarr to Overseerr: $($_.Exception.Message)"
+                }
+            }
+        } else {
+            Write-Fail "Could not get Sonarr profiles or root folders"
+        }
+    } catch {
+        Write-Fail "Failed to retrieve Sonarr configuration: $($_.Exception.Message)"
+    }
+}
+
+# Test enabling watchlist sync (like configure.sh does)
+Write-Test "Enabling Overseerr watchlist sync with auto-approval..."
+try {
+    # Get current settings
+    $currentSettings = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/main" -TimeoutSec 10
+    
+    # Update to enable auto-approval
+    $currentSettings.autoApproveMovie = $true
+    $currentSettings.autoApproveSeries = $true
+    
+    $response = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/main" -Method Post -Headers @{
+        "Content-Type" = "application/json"
+    } -Body ($currentSettings | ConvertTo-Json -Depth 10) -TimeoutSec 10
+    
+    if ($response.autoApproveMovie -eq $true -and $response.autoApproveSeries -eq $true) {
+        Write-Pass "Overseerr watchlist sync enabled with auto-approval"
+    } else {
+        Write-Fail "Overseerr watchlist sync settings not applied correctly"
+    }
+} catch {
+    Write-Fail "Failed to enable Overseerr watchlist sync: $($_.Exception.Message)"
+}
+} # End of overseerrInitialized check
+
+# Note about Plex connection
+Write-Info "Plex connection test skipped (requires actual Plex server running)"
+Write-Info "In production, configure.sh adds Plex connection at plex:32400"
+
+# =============================================================================
 # Verification Tests (Confirm wiring actually worked)
 # =============================================================================
 
@@ -1396,6 +1590,59 @@ if ($prowlarrApiKey) {
     }
 }
 
+# Verify Overseerr configuration (only if initialized)
+if ($overseerrInitialized) {
+    Write-Test "Verifying Overseerr has Radarr configured..."
+    try {
+        $overseerrRadarr = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/radarr" -TimeoutSec 10
+        if ($overseerrRadarr -and $overseerrRadarr.Count -gt 0) {
+            $radarrInstance = $overseerrRadarr[0]
+            if ($radarrInstance.name -eq "Radarr" -and $radarrInstance.hostname -eq "radarr") {
+                Write-Pass "Overseerr has Radarr configured (hostname: radarr, port: $($radarrInstance.port))"
+            } else {
+                Write-Warn "Overseerr has Radarr but configuration may be incomplete"
+            }
+        } else {
+            Write-Fail "Overseerr is missing Radarr configuration"
+        }
+    } catch {
+        Write-Fail "Could not verify Overseerr Radarr configuration: $($_.Exception.Message)"
+    }
+
+    Write-Test "Verifying Overseerr has Sonarr configured..."
+    try {
+        $overseerrSonarr = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/sonarr" -TimeoutSec 10
+        if ($overseerrSonarr -and $overseerrSonarr.Count -gt 0) {
+            $sonarrInstance = $overseerrSonarr[0]
+            if ($sonarrInstance.name -eq "Sonarr" -and $sonarrInstance.hostname -eq "sonarr") {
+                Write-Pass "Overseerr has Sonarr configured (hostname: sonarr, port: $($sonarrInstance.port))"
+            } else {
+                Write-Warn "Overseerr has Sonarr but configuration may be incomplete"
+            }
+        } else {
+            Write-Fail "Overseerr is missing Sonarr configuration"
+        }
+    } catch {
+        Write-Fail "Could not verify Overseerr Sonarr configuration: $($_.Exception.Message)"
+    }
+
+    Write-Test "Verifying Overseerr watchlist sync is enabled..."
+    try {
+        $overseerrMain = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/main" -TimeoutSec 10
+        if ($overseerrMain.autoApproveMovie -eq $true -and $overseerrMain.autoApproveSeries -eq $true) {
+            Write-Pass "Overseerr watchlist sync enabled with auto-approval for movies and TV"
+        } elseif ($overseerrMain.autoApproveMovie -eq $true -or $overseerrMain.autoApproveSeries -eq $true) {
+            Write-Warn "Overseerr watchlist sync partially enabled (movies: $($overseerrMain.autoApproveMovie), TV: $($overseerrMain.autoApproveSeries))"
+        } else {
+            Write-Fail "Overseerr watchlist sync is not enabled"
+        }
+    } catch {
+        Write-Fail "Could not verify Overseerr watchlist sync: $($_.Exception.Message)"
+    }
+} else {
+    Write-Skip "Overseerr verification tests (not initialized - requires Plex)"
+}
+
 # Summary of configuration state
 Write-Header "Configuration Summary"
 Write-Info "Final configuration state:"
@@ -1420,10 +1667,22 @@ if ($prowlarrApiKey) {
     Write-Host "    Prowlarr: $prowlarrIndexers indexer(s), $prowlarrApps connected app(s)" -ForegroundColor Cyan
 }
 
+# Add Overseerr summary
+try {
+    $overseerrRadarr = (Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/radarr" -TimeoutSec 10 -ErrorAction SilentlyContinue).Count
+    $overseerrSonarr = (Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/sonarr" -TimeoutSec 10 -ErrorAction SilentlyContinue).Count
+    $overseerrMain = Invoke-RestMethod -Uri "http://localhost:5055/api/v1/settings/main" -TimeoutSec 10 -ErrorAction SilentlyContinue
+    $watchlistEnabled = if ($overseerrMain.autoApproveMovie -and $overseerrMain.autoApproveSeries) { "enabled" } else { "disabled" }
+    Write-Host "    Overseerr: $overseerrRadarr Radarr, $overseerrSonarr Sonarr, watchlist sync $watchlistEnabled" -ForegroundColor Cyan
+} catch {
+    Write-Host "    Overseerr: Unable to retrieve configuration" -ForegroundColor DarkGray
+}
+
 Write-Host ""
 
 # =============================================================================
 # Cleanup
+# =============================================================================
 # =============================================================================
 
 Write-Header "Cleanup"
