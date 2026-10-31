@@ -177,3 +177,12 @@ templates/           # Pre-configured service templates
 5. Test with uninitialized services (graceful skip)
 6. Maintain PowerShell/Bash parity
 7. Document manual steps honestly
+
+## Commits and Branches
+
+From the landing zone's standards; the sections above stay as they are.
+
+- **Commit style:** conventional commits, `<type>: <description>` with feat, fix, refactor, docs, test, chore, perf or ci (the history already follows it). Say what changed in plain words.
+- **Branches:** commit on a working branch and open a pull request; never commit on or push `main`. `main` moves only by a merged pull request, with CI green.
+- **No attribution lines:** a commit or pull request carries no AI attribution line or trailer.
+- **Nothing personal in the repository:** addresses, hostnames, home paths, account names and keys live in `.env` and the service config files, never in a committed file.
