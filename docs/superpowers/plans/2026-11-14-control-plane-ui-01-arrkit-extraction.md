@@ -189,10 +189,10 @@ Expected:
 ```bash
 PATTERN='\b(192\.168|172\.(1[6-9]|2[0-9]|3[01]))\.[0-9]+\.[0-9]+\b|[a-f0-9]{32}\.plex\.direct|/home/[a-z]+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[a-z]{2,}'
 grep -rnoE "$PATTERN" . --exclude-dir=.git | grep -v '@example\.com' ; echo "files exit=$?"
-git log -p | grep -E '^\+' | grep -oE "$PATTERN" | grep -v '@example\.com' | sort -u ; echo "history exit=$?"
+HITS=$(git log -p | grep -E '^\+' | grep -oE "$PATTERN" | grep -v '@example\.com' | sort -u); [ -z "$HITS" ] && echo "history clean" || printf '%s\nhistory HITS\n' "$HITS"
 ```
 
-Expected: no output from either; both `exit=1`. If anything is found, **stop** and report it before publishing. Scrubbing history is a separate decision for the user.
+Expected: the files check prints `files exit=1` and the history check prints `history clean`. If anything is found, **stop** and report it before publishing. Scrubbing history is a separate decision for the user.
 
 - [ ] **Step 8: Commit**
 
@@ -557,4 +557,4 @@ Expected: the `test` and both `build` matrix jobs pass. Leave the merge to the u
 
 - `github.com/parsoFish/arrkit@v0.1.0` resolves through `proxy.golang.org`, and arrkit `main` CI is green.
 - The healarr PR is open with green CI. Its test package count is the baseline minus 8, and it carries no API changes.
-- Plan index row 1 is marked `done`, and Plan 2 is written against the real arrkit module.
+- Plan index row 1 is marked `done`, and Plan 1b (arrkit hardening) and Plan 2 are written next; Plan 3 is the first plan built on the real arrkit module.
