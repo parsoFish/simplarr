@@ -62,6 +62,54 @@ func TestStateAcrossTheLifecycle(t *testing.T) {
 	}
 }
 
+// The web app writes the body of each setup, login and logout response straight
+// into its cached auth state (web/src/api/auth.ts) and the route guards act on
+// it, so every body must carry the state AFTER the call, as a whole.
+func TestAuthEndpointsAnswerWithTheNewState(t *testing.T) {
+	e := newEnv(t, nil)
+
+	check := func(name string, resp *http.Response, body []byte, want stateBody) {
+		t.Helper()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200; body %s", name, resp.StatusCode, body)
+		}
+		if ct := resp.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+			t.Errorf("%s: Content-Type = %q, want application/json", name, ct)
+		}
+		var got stateBody
+		if err := json.Unmarshal(body, &got); err != nil {
+			t.Fatalf("%s: body is not a state object: %v\n%s", name, err, body)
+		}
+		if got != want {
+			t.Errorf("%s: body = %+v, want %+v (raw %s)", name, got, want, body)
+		}
+		// A renamed or dropped key would decode as false and could pass for a
+		// false-valued field, so require both keys to be present.
+		var keys map[string]bool
+		if err := json.Unmarshal(body, &keys); err != nil {
+			t.Fatalf("%s: body is not a flat object of booleans: %v\n%s", name, err, body)
+		}
+		for _, k := range []string{"setupRequired", "authenticated"} {
+			if _, ok := keys[k]; !ok {
+				t.Errorf("%s: body has no %q key: %s", name, k, body)
+			}
+		}
+	}
+
+	resp, body := e.do("POST", setupPath, map[string]string{"token": e.token, "password": testPassword})
+	check("setup", resp, body, stateBody{SetupRequired: false, Authenticated: false})
+
+	resp, body = e.do("POST", loginPath, map[string]string{"password": testPassword})
+	check("login", resp, body, stateBody{SetupRequired: false, Authenticated: true})
+
+	csrf := e.cookie(csrfCookieName)
+	if csrf == nil {
+		t.Fatal("no csrf cookie after login")
+	}
+	resp, body = e.do("POST", logoutPath, nil, "X-CSRF-Token", csrf.Value)
+	check("logout", resp, body, stateBody{SetupRequired: false, Authenticated: false})
+}
+
 func TestSetupErrors(t *testing.T) {
 	e := newEnv(t, nil)
 
