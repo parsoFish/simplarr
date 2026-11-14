@@ -1,0 +1,7 @@
+# Keep the build context small and the build reproducible.
+web/node_modules
+internal/webui/dist
+coverage.out
+Dockerfile
+.dockerignore
+**/*_test.go

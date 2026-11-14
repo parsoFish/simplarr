@@ -43,3 +43,10 @@ volumes/
 # Temporary files
 *.tmp
 *.temp
+
+# =============================================================================
+# Control-plane UI (app/)
+# =============================================================================
+app/web/node_modules/
+app/internal/webui/dist/
+app/coverage.out
