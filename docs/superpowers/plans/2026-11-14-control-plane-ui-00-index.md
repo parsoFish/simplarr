@@ -1,0 +1,23 @@
+# Control-plane UI — plan index
+
+**Spec:** [`docs/superpowers/specs/2026-11-14-control-plane-ui-design.md`](../specs/2026-11-14-control-plane-ui-design.md)
+
+The spec spans five subsystems: arrkit, backend, UI, mock harness and script retirement. Each plan below produces working, tested software on its own and lands as one or more PRs. A plan is written in full only when the plan before it has merged, because its code depends on the real APIs the earlier plan shipped. Writing them all up front would mean guessing signatures.
+
+| # | Plan | Repo(s) | Spec § | Delivers | Depends on | Status |
+|---|---|---|---|---|---|---|
+| 1 | [arrkit extraction](2026-11-14-control-plane-ui-01-arrkit-extraction.md) | arrkit (new), healarr | 3.2, 12.1 | `github.com/parsoFish/arrkit@v0.1.0` holding healarr's 7 service clients + `httpx`. healarr imports it, with no behaviour change | — | written |
+| 2 | App skeleton + auth | simplarr | 3.1, 3.3, 4, 8.2, 10 | `app/` module: env config validation, atomic file store, `/healthz`, setup-token → admin password → session login, CSRF, rate limit, slog redaction, Dockerfile (distroless, nonroot), CI `go` + `web` jobs, empty SPA shell with login/setup pages. Security review before commit | none. The skeleton has no arrkit dependency, so it can run in parallel with 1 | not written |
+| 3 | Discovery + credentials | simplarr | 5 | Service endpoint resolution per topology; API key readers (config.xml, settings.json, config.ini, Preferences.xml); the §5.1 service-state classifier; `secrets.json` store; Plex PIN flow; qBit verify; `GET /api/v1/services`, `/credentials*`. Security review before commit | 2 | not written |
+| 4 | Config resources + plan/apply | arrkit, simplarr | 6, 8.1 | arrkit: config endpoints (download clients, root folders, quality profiles, system status, Prowlarr applications/indexers/command, Overseerr settings + user settings) with fixtures. simplarr: `Resource` interface, the 11 milestone-1 resources, dependency graph with rank tie-break, plan/apply, the `simplarr plan|apply` CLI with the pattern-4 wait, `/api/v1/resources|plan|apply`. **First step: re-check ADR-013's trigger** (healarr `docs/decisions.md`): if the config surface turns out larger than "a handful of endpoints" per service, evaluate `golift.io/starr` for the arr apps before hand-rolling | 3 | not written |
+| 5 | Summaries + deployment view | arrkit, simplarr | 7 | arrkit: any missing read endpoints (Radarr/Sonarr diskspace, qBit transfer info, Overseerr request count, Tautulli activity). simplarr: `/api/v1/summary/{svc}` and `/api/v1/deployment`, with pinned image tags generated from the compose files | 3 | not written |
+| 6 | Web UI | simplarr | 7, 8 | React SPA: overview (replaces the homepage, with the link logic ported), deployment, configuration (diff + per-resource apply), service summaries, settings (credentials, password, profile read-only). Vitest + MSW. Uses the `frontend-design` skill | 4, 5 | not written |
+| 7 | Mock profiles + test matrix | arrkit, simplarr | 9 | arrkit: stateful HTTP fakes + `arrkit-mock seed|serve`, `-tags contract` suite. simplarr: the 10 profiles, layer 2 golden tests, layer 4 Playwright e2e (3 profiles on PRs, all nightly, arm64 nightly), layer 5 contract nightly + on pin changes | 4, 5, 6 | not written |
+| 8 | Cut-over + bootstrap + docs | simplarr | 3.3, 11, 9.2 (layer 6), 12.9–10 | Compose/nginx swap to `simplarr`; thin `configure.sh/.ps1`; delete `homepage/` and its tests; `setup.sh` creates `${DOCKER_CONFIG}/simplarr` and gets the GNU-`sed -i` fix; layer 6 bootstrap matrix (ubuntu, macOS, debian/fedora/alpine/arch containers, Windows Pester); README/CLAUDE.md/VERSIONS.md | 7 | not written |
+
+## Conventions for every plan
+
+- Work happens on a feature branch in a worktree (`.worktrees/<name>`, listed in `.git/info/exclude`). The branch is created with `--no-track` so a bare `git push` can never target `main`.
+- Conventional commits, no attribution trailers. `main` moves only by a merged PR with CI green.
+- Every deletion is named in the PR description and in the session before it happens.
+- Run the `security-review` skill before committing changes to auth, credentials, input handling or the API surface (Plans 2, 3, 4).
