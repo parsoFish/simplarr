@@ -38,8 +38,6 @@ $script:WarnCount = 0
 
 # Ports to check
 $PortsToCheck = @{
-    80    = "nginx (HTTP)"
-    443   = "nginx (HTTPS)"
     32400 = "Plex Media Server"
     8080  = "qBittorrent WebUI"
     7878  = "Radarr"
@@ -337,6 +335,13 @@ else {
 # 4. PORT AVAILABILITY CHECK
 #===============================================================================
 Show-ScriptSection "Port Availability"
+
+$nginxHttp = Get-EnvVariable "NGINX_HTTP_PORT"
+if (-not $nginxHttp) { $nginxHttp = 80 }
+$nginxHttps = Get-EnvVariable "NGINX_HTTPS_PORT"
+if (-not $nginxHttps) { $nginxHttps = 443 }
+$PortsToCheck[[int]$nginxHttp] = "nginx (HTTP)"
+$PortsToCheck[[int]$nginxHttps] = "nginx (HTTPS)"
 
 foreach ($port in $PortsToCheck.Keys | Sort-Object) {
     $service = $PortsToCheck[$port]

@@ -254,9 +254,11 @@ fi
 print_section "🔌 Port Availability"
 
 # Define ports and their services
+NGINX_HTTP_PORT="$(load_env_var NGINX_HTTP_PORT)"
+NGINX_HTTPS_PORT="$(load_env_var NGINX_HTTPS_PORT)"
 declare -A PORTS=(
-    [80]="nginx (HTTP)"
-    [443]="nginx (HTTPS)"
+    ["${NGINX_HTTP_PORT:-80}"]="nginx (HTTP)"
+    ["${NGINX_HTTPS_PORT:-443}"]="nginx (HTTPS)"
     [32400]="Plex Media Server"
     [8080]="qBittorrent WebUI"
     [7878]="Radarr"
