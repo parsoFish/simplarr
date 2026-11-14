@@ -6660,3 +6660,38 @@ Expected: the PR opens against `main`; `Lint (ShellCheck + PSScriptAnalyzer)`, `
 **Placeholder scan:** no step says "TBD", "add appropriate error handling" or "similar to Task N"; every code step embeds the full file.
 
 **Type and name consistency:** `Limiter.Allow` / `Reset` (Task 4) are the only limiter methods used in Task 7; `Session{ID, CSRF, Expires}` (Task 4) is what `protected` reads; `ServiceConfig` (Task 5) is what `buildHandler` fills (Task 8); `api.Deps` (Task 7) is what `buildHandler` passes; `webui.Dist` (Task 6) is what `cmdServe` calls; the web `AuthState` shape (Task 10) matches `stateResponse` (Task 7); cookie and header names are identical on both sides (`simplarr_csrf`, `X-CSRF-Token`).
+
+---
+
+## Execution notes (added after execution)
+
+Executed with subagent-driven development on `feat/app-skeleton-auth` (PR #36). Every task had a spec-compliance and quality review that mutation-tested the guards, and any finding went through a fix round and a scoped re-review. The security review ran twice (Gate A: Go backend, Gate B: SPA and lockfile) and found nothing at or above its bar; an `opus` whole-branch review ran before the merge. **Where the tree differs from a code block above, the tree is the source of truth.** Every difference came from a review finding and is covered by a test:
+
+| Files | Difference from the plan's code | Why |
+|---|---|---|
+| `internal/store/store.go`, `store_test.go` | Extra tests (rename failure leaves no temp file, the §5.3 chmod-failure refusal naming the file, a stat error, a `0o644` case) and a doc sentence on `WriteFileAtomic`. Task 2's expected `store` coverage is about 84%, not "7x%" | The plan said these branches cannot be triggered as a normal user; a reviewer triggered them |
+| `internal/logging/redact_test.go` | The pre-attached-attributes test also asserts the message survives | It could pass by logging nothing |
+| `internal/auth/password_test.go` | Deterministic capacity test, `NewHasher(p, 0/-1)` clamp test, a `DefaultParams` round-trip, more malformed-hash rows | Mutations of the concurrency bound passed the suite |
+| `internal/auth/session.go`, `session_test.go` | The store keeps `entry{csrf, expires}` with no raw ID (the key is its SHA-256) and `Get` re-attaches the ID | The "never holds a usable credential" claim was false |
+| `internal/auth/ratelimit_test.go` | The atomicity test releases 64 callers together, 200 rounds | The original caught a check-then-charge regression about 16% of the time |
+| `internal/api/errors.go`, `errors_test.go` (new) | A JSON-encoding failure is logged via `slog.Error` | No swallowed errors |
+| `internal/api/spa_test.go` | Traversal test uses a spy `fs.FS`; the 404 test asserts the envelope | The original could not fail |
+| `internal/api/*_test.go` | Many guards strengthened (logout cookie clearing, CSRF cookie leg, OPTIONS, secrets in logs, CSP, `X-Forwarded-Proto`, content types, IPv4-mapped IPv6); cookie tests split into `cookies_test.go`; a test for the response bodies of setup, login and logout | Vacuous tests found by mutation; the last one by the final review |
+| `internal/api/clientip.go`, `internal/auth/password.go`, `cmd/simplarr/serve.go` | Comment-only: the nginx claim is a deployment assumption, the memory cap is stated accurately, `buildHandler` documents `slog.SetDefault` | Accuracy |
+| `cmd/simplarr/serve.go`, `main_test.go`, `serve_test.go` (new), `healthcheck_test.go` (new) | `buildHandler` installs the redacting logger with `slog.SetDefault`; tests for graceful shutdown, `EnsureDir`, healthcheck exit codes and the `serve` fail-fast paths | Package-level `slog` calls must be redacted; the original tests passed with those behaviours deleted |
+| `web/src/api/client.ts`, `client.test.ts` | The HTTP method is upper-cased before the CSRF decision; a malformed percent-escape in a cookie falls back to the raw value | A lower-case `get` sent the CSRF header; a raw `URIError` could escape |
+| `web/src/api/auth.ts` | `gcTime: 0` and the auth state is revalidated on a failed mutation | The plaintext password stayed in the mutation cache for 5 minutes; a stale page after a failed sign-out |
+| `web/src/components/AuthStateError.tsx` (new), `RequireAuth.tsx`, `pages/LoginPage.tsx`, `pages/SetupPage.tsx` | Pages render from cached auth state; the error card with "Try again" shows only when no state ever loaded; `role="status"` on loading text; `SyntheticEvent` instead of the deprecated `FormEvent` | One failed background refetch tore down a signed-in page |
+| `web/src/test/*`, `web/eslint.config.js` | Requests without an MSW handler fail the test (the `onUnhandledFrame` setting alone only rejects the fetch); ESLint's `defineConfig` replaces the deprecated `tseslint.config` | A swallowed error left tests green |
+| `.github/workflows/ci.yml` | `timeout-minutes: 15`, `curl --max-time 5` and a 60-iteration health wait in the new jobs | Robustness |
+| `app/README.md` | Deployment claims (nginx, no published port, `plex.direct`, the Deployment page) are worded as assumptions or planned | They described later plans as present |
+
+Task 11 note: the session was interrupted after the implementer committed the Dockerfile and before it reported. The controller re-ran the verification script itself and wrote a stand-in report.
+
+### Deferred follow-ups (from the final review; none judged exploitable under the stated threat model)
+
+- **Before Plan 3's password change:** treat a directory-sync error after a successful rename in `store.WriteFileAtomic` as success-with-warning; tighten `validateHost` (newline, quotes, `[::1]`, `a:b:c`); validate `Params` when the `Hasher` is built; use a typed error for the password policy instead of trimming `err.Error()`.
+- **Hardening issue:** `Setup` re-checks `admin.json` on disk before writing; strict `admin.json` parsing (trailing data, duplicate keys); an explicit non-2xx and an INFO log when a request context is cancelled mid-login; a deadline around `Verify` so queued logins cannot pile up; keying IPv6 clients on `/64`, a global limiter ceiling and sampled blocked-request logging; calling `stop()` once the shutdown signal arrives; a startup sweep of leftover `.tmp-*` files; refusing dot-prefixed files from the embedded UI if a plugin ever emits one.
+- **Plan 6:** an automated check that client routes avoid the nginx prefixes; username and `name` attributes so password managers can save the credential; retry tests for the login and setup pages; `cause` on the network error; accept 204 in `apiFetch` when a 204 endpoint appears.
+- **Supply chain (one issue):** Renovate with digest-pinned base images and action SHAs, `govulncheck`, a Go patch release in CI that matches the image, narrowing `COPY . .`, BuildKit cache mounts, and a `**/.env*` guard in `.dockerignore`.
+- **Plan 8 handoffs** are in the index (row 8).
