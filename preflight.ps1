@@ -336,12 +336,30 @@ else {
 #===============================================================================
 Show-ScriptSection "Port Availability"
 
-$nginxHttp = Get-EnvVariable "NGINX_HTTP_PORT"
-if (-not $nginxHttp) { $nginxHttp = 80 }
-$nginxHttps = Get-EnvVariable "NGINX_HTTPS_PORT"
-if (-not $nginxHttps) { $nginxHttps = 443 }
-$PortsToCheck[[int]$nginxHttp] = "nginx (HTTP)"
-$PortsToCheck[[int]$nginxHttps] = "nginx (HTTPS)"
+# nginx host ports come from .env: refuse a non-port value (use the default),
+# and flag a port that another service in the table already owns.
+function Add-NginxPort {
+    param([string]$VarName, [string]$Label, [int]$Default)
+
+    $value = Get-EnvVariable $VarName
+    $port = $Default
+    if ($value) {
+        if ($value -match '^[0-9]{1,5}$' -and [int]$value -ge 1 -and [int]$value -le 65535) {
+            $port = [int]$value
+        }
+        else {
+            Fail "$VarName must be a port number (1-65535), got '$value'" "Fix it in your $EnvFile"
+        }
+    }
+    if ($PortsToCheck.ContainsKey($port)) {
+        Fail "$Label port $port collides with $($PortsToCheck[$port])" "Choose another $VarName in your $EnvFile"
+    }
+    else {
+        $PortsToCheck[$port] = $Label
+    }
+}
+Add-NginxPort "NGINX_HTTP_PORT" "nginx (HTTP)" 80
+Add-NginxPort "NGINX_HTTPS_PORT" "nginx (HTTPS)" 443
 
 foreach ($port in $PortsToCheck.Keys | Sort-Object) {
     $service = $PortsToCheck[$port]
