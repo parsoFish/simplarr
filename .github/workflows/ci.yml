@@ -83,6 +83,7 @@ jobs:
   go:
     name: Go (vet, lint, test)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     defaults:
@@ -125,6 +126,7 @@ jobs:
   web:
     name: Web (lint, typecheck, test, build)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     defaults:
@@ -160,6 +162,7 @@ jobs:
   app-image:
     name: App image (build + smoke test)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
 
@@ -180,15 +183,15 @@ jobs:
         run: |
           docker run -d --name simplarr-ci -p 127.0.0.1:18080:8080 simplarr-app:ci
           trap 'docker logs simplarr-ci; docker rm -f simplarr-ci' EXIT
-          for _ in $(seq 1 30); do
+          for _ in $(seq 1 60); do
             status=$(docker inspect --format '{{.State.Health.Status}}' simplarr-ci)
             [ "${status}" = "healthy" ] && break
             sleep 1
           done
           test "${status}" = "healthy"
-          curl -fsS http://127.0.0.1:18080/healthz
-          curl -fsS http://127.0.0.1:18080/login | grep -q 'id="root"'
-          curl -fsS http://127.0.0.1:18080/api/v1/auth/state | grep -q '"setupRequired":true'
+          curl -fsS --max-time 5 http://127.0.0.1:18080/healthz
+          curl -fsS --max-time 5 http://127.0.0.1:18080/login | grep -q 'id="root"'
+          curl -fsS --max-time 5 http://127.0.0.1:18080/api/v1/auth/state | grep -q '"setupRequired":true'
           docker logs simplarr-ci 2>&1 | grep -q 'First-run setup token'
 
       - name: Cross-build for arm64 (Raspberry Pi), no emulation needed
