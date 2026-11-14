@@ -64,6 +64,10 @@ func cmdServe(stdout, stderr io.Writer, getenv func(string) string) int {
 
 // buildHandler prepares /data, loads the admin state, prints the setup token
 // when first-run setup is pending, and returns the HTTP handler.
+//
+// It also installs logger (the redacting logger) as the process default with
+// slog.SetDefault. That is a deliberate process-wide side effect: package-level
+// slog calls, such as the one in internal/api/errors.go, must be redacted too.
 func buildHandler(cfg config.Config, logger *slog.Logger, static fs.FS) (http.Handler, error) {
 	// Package-level slog calls (for example in internal/api) must go through the
 	// redacting handler too.

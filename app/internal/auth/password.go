@@ -32,7 +32,9 @@ var DefaultParams = Params{Memory: 64 * 1024, Time: 3, Threads: 2, SaltLen: 16, 
 var ErrMalformedHash = errors.New("auth: malformed password hash")
 
 // Limits applied when parsing a stored hash, so a corrupt admin.json cannot
-// make Verify allocate gigabytes or spin for minutes.
+// make Verify use unbounded memory or spin for minutes. maxMemoryKiB bounds a
+// single hash to 1 GiB; with the default two concurrent hash slots (see
+// NewHasher) a corrupt stored hash could therefore use up to 2 GiB in total.
 const (
 	maxMemoryKiB = 1 << 20 // 1 GiB
 	maxTime      = 20

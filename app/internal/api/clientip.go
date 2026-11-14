@@ -9,11 +9,12 @@ import (
 
 // clientIP returns the address used to rate-limit a request.
 //
-// simplarr publishes no port: the only thing that can reach it is nginx, which
-// sets X-Real-IP from the TCP peer (spec §8.2). A direct connection (tests,
-// `docker exec`) has no header and falls back to the peer address. The header
-// is only trusted because of that network layout; if simplarr is ever exposed
-// directly, a client could vary it to dodge the limiter.
+// Deployment assumption (set up when the app joins compose and nginx in a later
+// plan): the app publishes no port and only nginx can reach it; nginx sets
+// X-Real-IP from the TCP peer (spec §8.2). Until then the header is trusted
+// from any caller, so a client that can reach the app directly can choose its
+// own address and dodge the limiter. A direct connection (tests, `docker exec`)
+// has no header and falls back to the peer address.
 func clientIP(r *http.Request) string {
 	if v := strings.TrimSpace(r.Header.Get("X-Real-IP")); v != "" {
 		if addr, err := netip.ParseAddr(v); err == nil {
