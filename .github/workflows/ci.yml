@@ -80,6 +80,120 @@ jobs:
       - name: Run ESLint on homepage JavaScript
         run: node homepage/node_modules/.bin/eslint homepage/js/
 
+  go:
+    name: Go (vet, lint, test)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Go
+        uses: actions/setup-go@v7.0.0
+        with:
+          go-version-file: app/go.mod
+          cache-dependency-path: app/go.sum
+
+      - name: go.mod is tidy
+        run: go mod tidy -diff
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: Tests (race detector)
+        run: go test ./... -race
+
+      - name: Coverage gate (internal/... must stay at or above 80%)
+        run: |
+          go test ./internal/... -race -coverprofile=coverage.out
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ { sub("%", "", $3); print $3 }')
+          echo "internal/... coverage: ${total}%"
+          awk -v t="$total" 'BEGIN { exit (t + 0 >= 80) ? 0 : 1 }' \
+            || { echo "::error::coverage ${total}% is below the 80% gate"; exit 1; }
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          version: v2.15.0
+          working-directory: app
+
+  web:
+    name: Web (lint, typecheck, test, build)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: app/web
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7.1.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: app/web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: ESLint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  app-image:
+    name: App image (build + smoke test)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
+
+      - name: Build the image
+        run: docker build --build-arg VERSION=ci -t simplarr-app:ci app
+
+      - name: Image runs as the non-root user
+        run: |
+          user=$(docker inspect --format '{{.Config.User}}' simplarr-app:ci)
+          echo "image user: ${user}"
+          test "${user}" = "65532:65532"
+
+      - name: Smoke test the running container
+        run: |
+          docker run -d --name simplarr-ci -p 127.0.0.1:18080:8080 simplarr-app:ci
+          trap 'docker logs simplarr-ci; docker rm -f simplarr-ci' EXIT
+          for _ in $(seq 1 30); do
+            status=$(docker inspect --format '{{.State.Health.Status}}' simplarr-ci)
+            [ "${status}" = "healthy" ] && break
+            sleep 1
+          done
+          test "${status}" = "healthy"
+          curl -fsS http://127.0.0.1:18080/healthz
+          curl -fsS http://127.0.0.1:18080/login | grep -q 'id="root"'
+          curl -fsS http://127.0.0.1:18080/api/v1/auth/state | grep -q '"setupRequired":true'
+          docker logs simplarr-ci 2>&1 | grep -q 'First-run setup token'
+
+      - name: Cross-build for arm64 (Raspberry Pi), no emulation needed
+        run: docker buildx build --platform linux/arm64 --build-arg VERSION=ci app
+
   fast-gate:
     name: Fast Gate (target < 15 min)
     runs-on: ubuntu-latest
