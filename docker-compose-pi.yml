@@ -121,10 +121,10 @@ services:
     image: nginx:1.28.2-alpine3.23
     container_name: nginx
     ports:
-      # Change the host side if 80/443 are already taken (e.g. a NAS admin
-      # UI): "8282:80" / "8443:443" — see readme.md "Port conflicts" note.
-      - "80:80"
-      - "443:443"
+      # Host ports come from NGINX_HTTP_PORT / NGINX_HTTPS_PORT in .env (default 80/443): change them when
+      # something else owns 80/443, e.g. a NAS admin UI or a shared reverse proxy. See readme.md "Port conflicts".
+      - "${NGINX_HTTP_PORT:-80}:80"
+      - "${NGINX_HTTPS_PORT:-443}:443"
     volumes:
       - ${DOCKER_CONFIG}/nginx/ssl:/etc/nginx/ssl:ro
       - ./nginx/split.conf:/etc/nginx/conf.d/default.conf:ro

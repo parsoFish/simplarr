@@ -255,8 +255,6 @@ print_section "🔌 Port Availability"
 
 # Define ports and their services
 declare -A PORTS=(
-    [80]="nginx (HTTP)"
-    [443]="nginx (HTTPS)"
     [32400]="Plex Media Server"
     [8080]="qBittorrent WebUI"
     [7878]="Radarr"
@@ -265,6 +263,28 @@ declare -A PORTS=(
     [5055]="Overseerr"
     [8181]="Tautulli"
 )
+
+# Add an nginx host port from .env: refuse a non-port value (use the default),
+# and flag a port that another service in the table already owns.
+add_nginx_port() {
+    local var_name=$1 label=$2 default=$3
+    local value
+    value="$(load_env_var "$var_name")"
+    if [[ -z "$value" ]]; then
+        value=$default
+    elif [[ ! "$value" =~ ^[0-9]{1,5}$ ]] || ((10#$value < 1 || 10#$value > 65535)); then
+        fail "${var_name} must be a port number (1-65535), got '${value}'" "Fix it in your ${ENV_FILE}"
+        value=$default
+    fi
+    value=$((10#$value))
+    if [[ -n "${PORTS[$value]+set}" ]]; then
+        fail "${label} port ${value} collides with ${PORTS[$value]}" "Choose another ${var_name} in your ${ENV_FILE}"
+    else
+        PORTS[$value]=$label
+    fi
+}
+add_nginx_port NGINX_HTTP_PORT "nginx (HTTP)" 80
+add_nginx_port NGINX_HTTPS_PORT "nginx (HTTPS)" 443
 
 for port in "${!PORTS[@]}"; do
     service="${PORTS[$port]}"
